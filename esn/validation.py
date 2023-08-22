@@ -1,12 +1,6 @@
 from functools import partial
-from itertools import product
-
-import matplotlib.pyplot as plt
 import numpy as np
 import skopt
-from skopt.learning import GaussianProcessRegressor as GPR
-from skopt.learning.gaussian_process.kernels import ConstantKernel, Matern
-from skopt.plots import plot_convergence
 from skopt.space import Real
 
 from esn.esn import ESN
@@ -157,7 +151,7 @@ def loop(
                     Y_val_fold[N_trans:], Y_val_pred[N_trans:]
                 )
                 # print("Fold Prediction", Y_val_fold[N_trans:N_trans+10], Y_val_pred[N_trans:N_trans+10])
-                print("Fold:", fold,", fold error: ", fold_error[fold])
+                print("Fold:", fold, ", fold error: ", fold_error[fold])
             # average over intervals
             val_error[val_idx_idx] = np.mean(fold_error)
             print("Val regime error:", val_error[val_idx_idx])

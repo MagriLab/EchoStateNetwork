@@ -1,0 +1,13 @@
+.idea/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+__pycache__/
+
+build/
+dist/
+
+venv*/
+
+tmp_*

@@ -1,8 +1,4 @@
-from functools import partial
-
 import numpy as np
-from scipy.sparse import csc_matrix, csr_matrix, lil_matrix
-from scipy.sparse.linalg import eigs as sparse_eigs
 from sklearn.linear_model import ElasticNet, Lasso, Ridge
 
 import esn.generate_input_weights as generate_input_weights
