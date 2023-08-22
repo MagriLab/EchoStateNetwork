@@ -1,0 +1,6 @@
+functools
+numpy
+matplotlib
+scikit-learn
+scipy
+
