@@ -69,8 +69,7 @@ def loop(
     n_realisations,
     N_washout,
     N_val,
-    N_trans,
-    ESN_type="standard",  # "standard" or "rijke"
+    N_trans=0,
     error_measure=errors.rmse,
 ):
     # initialize a base ESN object with unit input scaling and spectral radius
@@ -109,10 +108,13 @@ def loop(
             U_train,
             Y_train,
             tikhonov=tikh,
-
         )
 
         # divide test set in intervals and predict
+        if not isinstance(U_val, list):
+            U_val = [U_val]
+            Y_val = [Y_val]
+
         val_idx_list = range(len(U_val))
 
         val_error = np.zeros(len(val_idx_list))
@@ -148,16 +150,13 @@ def loop(
 
                 # compute error
                 fold_error[fold] = error_measure(
-                    Y_val_fold[N_trans:], Y_val_pred[N_trans:]
+                    Y_val_fold, Y_val_pred
                 )
                 # print("Fold Prediction", Y_val_fold[N_trans:N_trans+10], Y_val_pred[N_trans:N_trans+10])
                 print("Fold:", fold, ", fold error: ", fold_error[fold])
             # average over intervals
             val_error[val_idx_idx] = np.mean(fold_error)
             print("Val regime error:", val_error[val_idx_idx])
-            # @todo: not only the smallest error, also the val errors should be close to each other
-            # also consistent over the folds, can minimize mean and standard deviation or max-min
-            # sum()+diff()
         # sum over validation regimes
         realisation_error[real_idx] = np.sum(val_error)
         print("Realisation error:", realisation_error[real_idx])
@@ -186,8 +185,7 @@ def validate(
     n_realisations,
     N_washout_steps,
     N_val_steps,
-    N_transient_steps,
-    ESN_type="standard",
+    N_transient_steps=0,
     random_seed=20,
     error_measure=errors.rmse,
 ):
@@ -227,7 +225,6 @@ def validate(
         N_washout=N_washout_steps,
         N_val=N_val_steps,
         N_trans=N_transient_steps,
-        ESN_type=ESN_type,
         error_measure=error_measure,
     )
 

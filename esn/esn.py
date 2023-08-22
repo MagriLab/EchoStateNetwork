@@ -1,10 +1,8 @@
 import numpy as np
-from sklearn.linear_model import ElasticNet, Lasso, Ridge
+from sklearn.linear_model import Ridge
 
 import esn.generate_input_weights as generate_input_weights
 import esn.generate_reservoir_weights as generate_reservoir_weights
-# from esn.utils.discretizations import finite_differences
-
 
 class ESN:
     def __init__(
@@ -31,11 +29,10 @@ class ESN:
             reservoir_size: number of neurons in the reservoir
             dimension: dimension of the state space of the input and output
                 they must have the same size in order for the closed-loop to work
-            parameter_dimension: dimension of the system's bifurcation parameters
             reservoir_connectivity: connectivity of the reservoir weights,
                 how many connections does each neuron have (on average)
             input_normalization: normalization applied to the input before activation
-                tuple with (mean, norm) such that u is updated as (u-mean)/norm
+                tuple with (mean, norm) such that input u is updated as (u-mean)/norm
             input_scaling: scaling applied to the input weights matrix
             spectral_radius: spectral radius (maximum absolute eigenvalue)
                 of the reservoir weights matrix
@@ -307,14 +304,13 @@ class ESN:
         Args:
             x_prev: reservoir state in the previous time step (n-1)
             u: input in this time step (n)
-            p: systems bifucation parameters vector
         Returns:
             x_next: reservoir state in this time step (n)
         """
         # normalise the input
         u_norm = (u - self.norm_in[0]) / self.norm_in[1]
         # we normalize here, so that the input is normalised
-        # in closed-loop run too?
+        # in closed-loop run too
 
         # augment the input with the input bias
         u_augmented = np.hstack((u_norm, self.b_in))
@@ -436,11 +432,6 @@ class ESN:
             Y: output data
             tikh: tikhonov coefficient that regularises L2 norm
         """
-        # @todo:
-        # can set the method for ridge regression, compare the methods
-        # scikit recommends minibatch sgd method for large scale data
-        # Alberto implements the closed-form solution because he doesn't want to recalculate
-        # the matmuls for each tikhonov parameter?
         reg = Ridge(alpha=tikh, fit_intercept=False)
         reg.fit(X, Y)
         W_out = reg.coef_.T
