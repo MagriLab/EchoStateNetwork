@@ -12,6 +12,7 @@ class ESN:
         reservoir_connectivity=0,
         input_normalization=None,
         input_scaling=1.0,
+        tikhonov=1e-9,
         spectral_radius=1.0,
         leak_factor=1.0,
         input_bias=np.array([]),
@@ -81,6 +82,7 @@ class ESN:
         self.input_weights_mode = input_weights_mode
         self.input_weights = self.generate_input_weights()
         self.input_scaling = input_scaling
+        self.tikh = tikhonov
         # input weights are automatically scaled if input scaling is updated
 
         # initialise reservoir weights
@@ -126,7 +128,7 @@ class ESN:
         if new_leak_factor < 0 or new_leak_factor > 1:
             raise ValueError("Leak factor must be between 0 and 1 (including).")
         self.alpha = new_leak_factor
-        return
+   
 
     @property
     def tikhonov(self):
@@ -138,7 +140,7 @@ class ESN:
         if new_tikhonov <= 0:
             raise ValueError("Tikhonov coefficient must be greater than 0.")
         self.tikh = new_tikhonov
-        return
+
 
     @property
     def input_normalization(self):
@@ -430,9 +432,9 @@ class ESN:
         Args:
             X: input data
             Y: output data
-            tikh: tikhonov coefficient that regularises L2 norm
+            tikh: weighing tikhonov coefficient that regularises L2 norm
         """
-        reg = Ridge(alpha=tikh, fit_intercept=False)
+        reg = Ridge(alpha=self.tikh, fit_intercept=False)
         reg.fit(X, Y)
         W_out = reg.coef_.T
         return W_out
@@ -489,6 +491,5 @@ class ESN:
             X_train_augmented = self.reservoir_for_train(U_washout, U_train)
 
         # solve for W_out using ridge regression
-        self.tikhonov = tikhonov  # set the tikhonov during training
-        self.output_weights = self.solve_ridge(X_train_augmented, Y_train, tikhonov)
+        self.output_weights = self.solve_ridge(X_train_augmented, Y_train, self.tikh)
         return

@@ -59,7 +59,6 @@ def loop(
     param_names,
     param_scales,
     ESN_dict,
-    tikh,
     U_washout_train,
     U_train,
     U_val,
@@ -106,8 +105,7 @@ def loop(
         my_ESN.train(
             U_washout_train,
             U_train,
-            Y_train,
-            tikhonov=tikh,
+            Y_train
         )
 
         # divide test set in intervals and predict
@@ -175,7 +173,6 @@ def validate(
     n_calls,
     n_initial_points,
     ESN_dict,
-    tikh,
     U_washout_train,
     U_train,
     U_val,
@@ -214,7 +211,6 @@ def validate(
         param_names=param_names,
         param_scales=param_scales,
         ESN_dict=ESN_dict,
-        tikh=tikh,
         U_washout_train=U_washout_train,
         U_train=U_train,
         U_val=U_val,
@@ -243,7 +239,6 @@ def validate(
             min_dict[param_name][j] = new_param
 
         min_dict["f"][j] = res.func_vals[min_idx]
-    min_dict["tikh"] = tikh
     print(min_dict)
 
     return min_dict
