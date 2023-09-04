@@ -29,6 +29,6 @@ def nrmse(y, y_pred, axis=None, normalize_by="rms"):
     elif normalize_by == "maxmin":
         norm = np.max(y, axis=axis) - np.min(y, axis=axis)
     elif normalize_by == "std":
-        norm = np.std(y_pred)**2
+        norm = np.std(y)**2
 
     return rmse(y, y_pred, axis) / norm
