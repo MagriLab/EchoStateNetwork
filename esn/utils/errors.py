@@ -25,8 +25,10 @@ def rmse(y, y_pred, axis=None):
 def nrmse(y, y_pred, axis=None, normalize_by="rms"):
     # Calculate the normalized root mean squared error.
     if normalize_by == "rms":
-        norm = np.sqrt(np.mean(y) ** 2, axis=axis)
+        norm = np.sqrt(np.mean(y) ** 2)
     elif normalize_by == "maxmin":
         norm = np.max(y, axis=axis) - np.min(y, axis=axis)
+    elif normalize_by == "std":
+        norm = np.std(y_pred)**2
 
     return rmse(y, y_pred, axis) / norm
