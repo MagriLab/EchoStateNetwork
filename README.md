@@ -10,6 +10,6 @@ The main purpose of this project is to provide a reference implementation of an 
 
 ## Prerequisites
 
-Before using this project, ensure you have the following prerequisites installed. You can find detailed installation instructions in the `requirements.txt` file.
+Before using this project, ensure you have the prerequisites installed, which you can find in the `requirements.txt` file.
 
 Reach out to Defne or Elise in case of questions! 
