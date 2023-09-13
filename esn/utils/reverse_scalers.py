@@ -3,4 +3,4 @@ def uniform(x):
 
 
 def log10(x):
-    return 10**x
+    return 10.0**x

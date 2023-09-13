@@ -1,7 +1,8 @@
 from functools import partial
+from itertools import product
 import numpy as np
 import skopt
-from skopt.space import Real
+from skopt.space import Integer, Real
 
 from esn.esn import ESN
 from esn.utils import errors, reverse_scalers
@@ -29,23 +30,54 @@ def set_ESN(my_ESN, param_names, param_scales, params):
         setattr(my_ESN, param_name, new_param)
     return
 
+def create_search_grid(n_param, n_grid, grid_range):
+    """Generates a grid for the given grid ranges and number of grid points
+    Works for any number of parameters
+    Needs return a list of lists for skopt minimize
+    Args:
+        n_grid: number of grid points for each parameter
+        grid_range: search range for each parameter
+    Returns:
+        search_grid
+    """
+    # initialise list of np.arrays that holds the range of each parameter
+    param_grid = [None] * n_param
+    for param_idx in range(n_param):
+        param_grid[param_idx] = np.linspace(*grid_range[param_idx], n_grid[param_idx])
+
+    # create the search grid from the parameter grids
+    search_grid = product(*param_grid, repeat=1)
+
+    # itertools.product returns a list of tuples
+    # turn it to a list of lists
+    search_grid = [list(search_list) for search_list in search_grid]
+
+    return search_grid
+
 
 def create_search_space(n_param, grid_range, param_names):
     search_space = [None] * n_param
     for param_idx in range(n_param):
-        search_space[param_idx] = Real(
-            *grid_range[param_idx], name=param_names[param_idx]
-        )
+        if param_names[param_idx] == "tikhonov":
+            search_space[param_idx] = Integer(
+                *grid_range[param_idx], name=param_names[param_idx]
+            )
+        else:
+            search_space[param_idx] = Real(
+                *grid_range[param_idx], name=param_names[param_idx]
+            )
+
     return search_space
 
 
-def run_gp_optimization(val_fun, search_space, n_calls, n_initial_points, rand_state):
+def run_gp_optimization(val_fun, search_space, n_calls, n_initial_points, rand_state, search_grid=None):
     print(f"Input to run_gp:{ search_space, n_calls, n_initial_points, rand_state}")
     # Bayesian Optimization
     res = skopt.gp_minimize(
         val_fun,  # the function to minimize
         search_space,  # the bounds on each dimension of params
         n_calls=n_calls,  # total number of evaluations of f
+        x0=search_grid,
         n_initial_points=n_initial_points,  # the number of additional random initialization points
         random_state=0,  # seed
         noise=1e-10,
@@ -183,6 +215,7 @@ def validate(
     N_washout_steps,
     N_val_steps,
     N_transient_steps=0,
+    n_grid=None,
     random_seed=20,
     error_measure=errors.rmse,
 ):
@@ -191,6 +224,13 @@ def validate(
 
     # ranges for hyperparameters
     search_space = create_search_space(n_param, grid_range, param_names)
+
+    # grid points to start the search
+    if n_grid:
+        search_grid = create_search_grid(n_param, n_grid, grid_range)
+        n_calls = len(search_grid) + n_calls
+    else:
+        search_grid = None
 
     # initialize dictionary to hold the minimum parameters and errors
     n_top = 5
@@ -225,7 +265,12 @@ def validate(
     )
 
     res = run_gp_optimization(
-        val_fun, search_space, n_calls, n_initial_points, rand_state=random_seed
+        val_fun, 
+        search_space, 
+        n_calls, 
+        n_initial_points, 
+        rand_state=random_seed,
+        search_grid=search_grid,
     )
     # find the top 5 parameters
     min_idx_list = res.func_vals.argsort()[:n_top]
