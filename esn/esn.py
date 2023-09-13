@@ -91,7 +91,18 @@ class ESN:
             self.W_seeds = reservoir_seeds
             self.W_shape = (self.N_reservoir, self.N_reservoir)
             self.reservoir_weights_mode = reservoir_weights_mode
-            self.reservoir_weights = self.generate_reservoir_weights()
+            valid_W = False
+            while not valid_W:
+                try:
+                    self.reservoir_weights = self.generate_reservoir_weights()
+                    valid_W = True
+                except:
+                    # perturb the seeds
+                    for i in range(2):
+                        if self.W_seeds[i]:
+                            self.W_seeds[i] = self.W_seeds[i] + 1
+                    valid_W = False
+                    print("Not valid reservoir encountered, changing seed.")
             self.spectral_radius = spectral_radius
             # reservoir weights are automatically scaled if spectral radius is updated
 
