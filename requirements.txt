@@ -1,6 +1,7 @@
-functools
 numpy
 matplotlib
 scikit-learn
 scipy
-sys
+scikit-optimize
+ipykernel
+jax
