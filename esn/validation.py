@@ -60,7 +60,7 @@ def create_search_space(n_param, grid_range, param_names):
     for param_idx in range(n_param):
         if param_names[param_idx] == "tikhonov":
             search_space[param_idx] = Integer(
-                *grid_range[param_idx], name=param_names[param_idx]
+                *grid_range[param_idx], name=param_names[param_idx], dtype=np.int32
             )
         else:
             search_space[param_idx] = Real(
