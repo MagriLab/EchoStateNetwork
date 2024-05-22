@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 # from jax.experimental import sparse
 
+
 def erdos_renyi1(W_shape, sparseness, W_seeds):
     """
     Create the reservoir weights matrix according to Erdos-Renyi network.
@@ -17,11 +18,9 @@ def erdos_renyi1(W_shape, sparseness, W_seeds):
     rnd0, rnd1 = jax.random.split(jax.random.PRNGKey(W_seeds[0]), 2)
     W = jnp.zeros(W_shape)
     # Generate random connections matrix
-    W_connection = jax.random.uniform(
-        rnd0, shape=W_shape, minval=0, maxval=1.0)
+    W_connection = jax.random.uniform(rnd0, shape=W_shape, minval=0, maxval=1.0)
     # generate the weights from the uniform distribution (-1,1)
-    W_weights = jax.random.uniform(
-        rnd1, shape=W_shape, minval=-1.0, maxval=1.0)
+    W_weights = jax.random.uniform(rnd1, shape=W_shape, minval=-1.0, maxval=1.0)
     # Apply sparseness condition to generate final weights matrix
     W = jnp.where(W_connection < (1 - sparseness), W_weights, W)
     # Normalize the matrix to control spectral radius
@@ -48,8 +47,7 @@ def erdos_renyi2(W_shape, sparseness, W_seeds):
     i, j = jnp.indices(W_shape)
     # Generate random values
     b_values = jax.random.uniform(rnd0, shape=W_shape, minval=0.0, maxval=1.0)
-    rnd_values = jax.random.uniform(
-        rnd1, shape=W_shape, minval=0.0, maxval=1.0)
+    rnd_values = jax.random.uniform(rnd1, shape=W_shape, minval=0.0, maxval=1.0)
     # Mask indices where i != j and b < prob
     mask = (i != j) & (b_values < prob)
     # Set values in the matrix at the specified indices

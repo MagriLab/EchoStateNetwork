@@ -29,6 +29,6 @@ def nrmse(y, y_pred, axis=None, normalize_by="rms"):
     elif normalize_by == "maxmin":
         norm = jnp.max(y, axis=axis) - jnp.min(y, axis=axis)
     elif normalize_by == "std":
-        norm = jnp.std(y)**2
+        norm = jnp.std(y) ** 2
 
     return rmse(y, y_pred, axis) / norm

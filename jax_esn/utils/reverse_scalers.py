@@ -1,4 +1,6 @@
 import jax.numpy as jnp
+
+
 def uniform(x):
     return x
 

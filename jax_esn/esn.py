@@ -3,6 +3,7 @@ import jax
 from sklearn.linear_model import Ridge
 from jax_esn import generate_input_weights, generate_reservoir_weights
 
+
 class ESN:
     def __init__(
         self,
@@ -19,9 +20,7 @@ class ESN:
         input_seeds=[1, 2, 3],
         reservoir_seeds=[1, 2],
         verbose=True,
-        r2_mode=False,
-        input_only_mode=False,
-        input_weights_mode="sparse_grouped",
+        input_weights_mode="sparse_random",
         reservoir_weights_mode="erdos_renyi2",
     ):
         """Creates an Echo State Network with the given parameters
@@ -46,8 +45,6 @@ class ESN:
 
         """
         self.verbose = verbose
-        self.r2_mode = r2_mode
-        self.input_only_mode = input_only_mode
 
         # Hyperparameters
         # these should be fixed during initialization and not changed since they affect
@@ -72,10 +69,7 @@ class ESN:
         # the object should also store the seeds for reproduction
         # initialise input weights
         self.W_in_seeds = input_seeds
-        self.W_in_shape = (
-            self.N_reservoir,
-            self.N_dim + len(self.input_bias)
-        )
+        self.W_in_shape = (self.N_reservoir, self.N_dim + len(self.input_bias))
         # N_dim+length of input bias because we augment the inputs with a bias
         # if no bias, then this will be + 0
         self.input_weights_mode = input_weights_mode
@@ -84,25 +78,27 @@ class ESN:
         self.tikh = tikhonov
         # input weights are automatically scaled if input scaling is updated
 
-        # initialise reservoir weights
-        if not self.input_only_mode:
-            self.reservoir_connectivity = reservoir_connectivity
-            self.W_seeds = reservoir_seeds
-            self.W_shape = (self.N_reservoir, self.N_reservoir)
-            self.reservoir_weights_mode = reservoir_weights_mode
-            self.reservoir_weights = self.generate_reservoir_weights()
-            self.spectral_radius = spectral_radius
-            # reservoir weights are automatically scaled if spectral radius is updated
+        self.reservoir_connectivity = reservoir_connectivity
+        self.W_seeds = reservoir_seeds
+        self.W_shape = (self.N_reservoir, self.N_reservoir)
+        self.reservoir_weights_mode = reservoir_weights_mode
+        self.reservoir_weights = self.generate_reservoir_weights()
+        self.spectral_radius = spectral_radius
+        # reservoir weights are automatically scaled if spectral radius is updated
 
         # initialise output weights
         self.W_out_shape = (self.N_reservoir + len(self.output_bias), self.N_dim)
         # N_reservoir+length of output bias because we augment the outputs with a bias
         # if no bias, then this will be + 0
         self.output_weights = jnp.zeros(self.W_out_shape)
+        self._dfdu_const = None
+        self._dudx_const = None
+        self._dfdu_dudx_const = None
+        self._dfdx_x_const = None
 
         # self.step = jax.jit(jax.tree_util.Partial(self._step,TRAINING=False))
-            
-        self.step_jit = jax.jit(jax.tree_util.Partial(step, [jnp.array(self.norm_in), self.b_in, self.input_only_mode, self.W_in, self.W, self.alpha]))
+
+        self.step_jit = jax.jit(jax.tree_util.Partial(step, [jnp.array(self.norm_in), self.b_in, self.W_in, self.W, self.alpha]))
 
     @property
     def reservoir_connectivity(self):
@@ -131,7 +127,6 @@ class ESN:
         if new_leak_factor < 0 or new_leak_factor > 1:
             raise ValueError("Leak factor must be between 0 and 1 (including).")
         self.alpha = new_leak_factor
-   
 
     @property
     def tikhonov(self):
@@ -144,17 +139,15 @@ class ESN:
             raise ValueError("Tikhonov coefficient must be greater than 0.")
         self.tikh = new_tikhonov
 
-
     @property
     def input_normalization(self):
         return self.norm_in
-    
+
     @input_normalization.setter
     def input_normalization(self, new_input_normalization):
         self.norm_in = new_input_normalization
         if self.verbose:
             print("Input normalization is changed, training must be done again.")
-
 
     @property
     def input_scaling(self):
@@ -167,14 +160,14 @@ class ESN:
         """
         if hasattr(self, "sigma_in"):
             # rescale the input matrix
-            self.W_in = (1 / self.sigma_in) * self.W_in #.todense()
+            self.W_in = (1 / self.sigma_in) * self.W_in  # .todense()
             # self.W_in = sparse.csr_fromdense(self.W_in)
         # set input scaling
-       
+
         if self.verbose:
             print("Input weights are rescaled with the new input scaling.")
-        self.sigma_in = new_input_scaling 
-        self.W_in = self.sigma_in * self.W_in #.todense()
+        self.sigma_in = new_input_scaling
+        self.W_in = self.sigma_in * self.W_in  # .todense()
         # self.W_in = sparse.csr_fromdense(self.W_in)
         return
 
@@ -189,11 +182,11 @@ class ESN:
         """
         if hasattr(self, "rho"):
             # rescale the reservoir matrix
-            
-            self.W = (1 / self.rho) * self.W#.todense()
+
+            self.W = (1 / self.rho) * self.W  # .todense()
             # self.W = sparse.csr_fromdense(self.W)
         # set spectral radius
-        
+
         if self.verbose:
             print("Reservoir weights are rescaled with the new spectral radius.")
         self.rho = new_spectral_radius
@@ -231,8 +224,7 @@ class ESN:
         # first check the dimensions
         if new_reservoir_weights.shape != self.W_shape:
             raise ValueError(
-                f"The shape of the provided reservoir weights does not match with the network,"
-                f"{new_reservoir_weights.shape} != {self.W_shape}"
+                f"The shape of the provided reservoir weights does not match with the network," f"{new_reservoir_weights.shape} != {self.W_shape}"
             )
 
         # set the new reservoir weights
@@ -253,8 +245,7 @@ class ESN:
         # first check the dimensions
         if new_output_weights.shape != self.W_out_shape:
             raise ValueError(
-                f"The shape of the provided output weights does not match with the network,"
-                f"{new_output_weights.shape} != {self.W_out_shape}"
+                f"The shape of the provided output weights does not match with the network," f"{new_output_weights.shape} != {self.W_out_shape}"
             )
         # set the new reservoir weights
         self.W_out = new_output_weights
@@ -288,13 +279,9 @@ class ESN:
 
     def generate_input_weights(self):
         if self.input_weights_mode == "sparse_random":
-            return generate_input_weights.sparse_random(
-                self.W_in_shape, self.W_in_seeds
-            )
+            return generate_input_weights.sparse_random(self.W_in_shape, self.W_in_seeds)
         elif self.input_weights_mode == "sparse_grouped":
-            return generate_input_weights.sparse_grouped(
-                self.W_in_shape, self.W_in_seeds
-            )
+            return generate_input_weights.sparse_grouped(self.W_in_shape, self.W_in_seeds)
         elif self.input_weights_mode == "dense":
             return generate_input_weights.dense(self.W_in_shape, self.W_in_seeds)
         else:
@@ -302,18 +289,13 @@ class ESN:
 
     def generate_reservoir_weights(self):
         if self.reservoir_weights_mode == "erdos_renyi1":
-            return generate_reservoir_weights.erdos_renyi1(
-                self.W_shape, self.sparseness, self.W_seeds
-            )
+            return generate_reservoir_weights.erdos_renyi1(self.W_shape, self.sparseness, self.W_seeds)
         if self.reservoir_weights_mode == "erdos_renyi2":
-            return generate_reservoir_weights.erdos_renyi2(
-                self.W_shape, self.sparseness, self.W_seeds
-            )
+            return generate_reservoir_weights.erdos_renyi2(self.W_shape, self.sparseness, self.W_seeds)
         else:
             raise ValueError("Not valid reservoir weights generator.")
-        
 
-    def open_loop(self, x0, U, P=None):
+    def open_loop(self, x0, U):
         """Advances ESN in open-loop.
         Args:
             x0: initial reservoir state
@@ -343,16 +325,13 @@ class ESN:
     def before_readout_r2(self, x):
         # replaces r with r^2 if even, r otherwise
         x2 = x.copy()
-        x2 = x2.at[1::2].set( x2[1::2] ** 2)
+        x2 = x2.at[1::2].set(x2[1::2] ** 2)
         return jnp.hstack((x2, self.b_out))
 
     @property
     def before_readout(self):
         if not hasattr(self, "_before_readout"):
-            if self.r2_mode:
-                self._before_readout = self.before_readout_r2
-            else:
-                self._before_readout = self.before_readout_r1
+            self._before_readout = self.before_readout_r1
         return self._before_readout
 
     def closed_loop(self, x0, N_t):
@@ -372,13 +351,13 @@ class ESN:
 
         # initialize with the given initial reservoir states
         X = X.at[0, :].set(x0)
-        
+
         # augment the reservoir states with the bias
         x0_augmented = self.before_readout(x0)
 
         # initialise with the calculated output states
-        Y = Y.at[0, :].set( jnp.dot(x0_augmented, self.W_out))
-        
+        Y = Y.at[0, :].set(jnp.dot(x0_augmented, self.W_out))
+
         # step in time
         for n in range(1, N_t + 1):
             # update the reservoir with the feedback from the output
@@ -432,24 +411,11 @@ class ESN:
         # augment with the bias
         N_t = X_train.shape[0]  # number of time steps
 
-        if self.r2_mode:
-            X_train2 = X_train.copy()
-            X_train2 = X_train2.at[:, 1::2].set(X_train2[:, 1::2] ** 2)
-            X_train_augmented = jnp.hstack((X_train2, self.b_out * jnp.ones((N_t, 1))))
-        else:
-            X_train_augmented = jnp.hstack((X_train, self.b_out * jnp.ones((N_t, 1))))
+        X_train_augmented = jnp.hstack((X_train, self.b_out * jnp.ones((N_t, 1))))
 
         return X_train_augmented
 
-    def train(
-        self,
-        U_washout,
-        U_train,
-        Y_train,
-        tikhonov=1e-12,
-        train_idx_list=None,
-        ridge_tol=0.0001
-    ):
+    def train(self, U_washout, U_train, Y_train, ridge_tol=0.0001):
         """Trains ESN and sets the output weights.
         Args:
             U_washout: washout input time series
@@ -462,25 +428,48 @@ class ESN:
         """
         # get the training input
         # this is the reservoir states augmented with the bias after a washout phase
-        if isinstance(U_train, list):
-            X_train_augmented = jnp.empty((0, self.W_out_shape[0]))
-            if train_idx_list is None:
-                train_idx_list = range(len(U_train))
-            for train_idx in train_idx_list:
-                X_train_augmented_ = self.reservoir_for_train(U_washout[train_idx], U_train[train_idx])
-                X_train_augmented = jnp.vstack((X_train_augmented, X_train_augmented_))
-
-            Y_train = [Y_train[train_idx] for train_idx in train_idx_list]
-            Y_train = jnp.vstack(Y_train)
-        else:
-            X_train_augmented = self.reservoir_for_train(U_washout, U_train)
+        X_train_augmented = self.reservoir_for_train(U_washout, U_train)
 
         # solve for W_out using ridge regression
         self.output_weights = self.solve_ridge(X_train_augmented, Y_train, self.tikh, ridge_tol)
         return
 
+    def dfdu_const(self):
+        if self._dfdu_const is None:
+            try:
+                self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim] * (1.0 / self.norm_in[1][: self.N_dim])
+            except:
+                self._dfdu_const = self.alpha * (self.W_in[:, : self.N_dim] * (1.0 / self.norm_in[1][: self.N_dim]))
+        return self._dfdu_const
 
-#moved the esn step outside for now to make jitting possible
+    def dudx_const(self):
+        return self.W_out[: self.N_reservoir, :].T
+
+    def dfdu_dudx_const(self):
+        if self._dfdu_dudx_const is None:
+            self._dfdu_dudx_const = jnp.dot(self.dfdu_const(), self.dudx_const())
+        return self._dfdu_dudx_const
+
+    def dfdx_x_const(self):
+        if self._dfdx_x_const is None:
+            self._dfdx_x_const = (1 - self.alpha) * jnp.eye(self.N_reservoir)
+        return self._dfdx_x_const
+
+    def dtanh(self, x, x_prev):
+        x_tilde = (x - (1 - self.alpha) * x_prev) / self.alpha
+        dtanh = 1.0 - x_tilde**2
+        return dtanh
+
+    def dfdx_u(self, dtanh):
+        return jnp.multiply(self.dfdu_dudx_const(), dtanh)
+
+    def jac(self, dtanh, x_prev=None):
+        dfdx_x = self.dfdx_x_const() + self.alpha * self.W * dtanh
+        dfdx = dfdx_x + self.dfdx_u(dtanh)
+        return dfdx
+
+
+# moved the esn step outside for now to make jitting possible
 def step(esn_attr, x_prev, u):
     """Advances ESN time step.
     Args:
@@ -490,7 +479,7 @@ def step(esn_attr, x_prev, u):
         x_next: reservoir state in this time step (n)
     """
 
-    [norm_in, b_in, input_only_mode, W_in, W, alpha] = esn_attr
+    [norm_in, b_in, W_in, W, alpha] = esn_attr
 
     # normalise the input
     u_norm = (u - norm_in[0]) / norm_in[1]
@@ -501,10 +490,7 @@ def step(esn_attr, x_prev, u):
     u_augmented = jnp.hstack((u_norm, b_in))
 
     # update the reservoir
-    if input_only_mode:
-        x_tilde = jnp.tanh(W_in.dot(u_augmented))
-    else:
-        x_tilde = jnp.tanh(W_in.dot(u_augmented) + W.dot(x_prev))
+    x_tilde = jnp.tanh(W_in.dot(u_augmented) + W.dot(x_prev))
 
     # apply the leaky integrator
     x = (1 - alpha) * x_prev + alpha * x_tilde
