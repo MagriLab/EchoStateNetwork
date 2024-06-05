@@ -1,6 +1,5 @@
-import jax.numpy as jnp
 import jax
-from sklearn.linear_model import Ridge
+import jax.numpy as jnp
 from jax_esn import generate_input_weights, generate_reservoir_weights
 
 
@@ -38,6 +37,7 @@ class ESN:
             leak_factor: factor for the leaky integrator
                 if set to 1 (default), then no leak is applied
             input_bias: bias that is augmented to the input vector
+            output_bias: bias that is augmented to the reservoir state vector before readout
             input_seeds: seeds to generate input weights matrix
             reservoir_seeds: seeds to generate reservoir weights matrix
         Returns:
@@ -47,10 +47,13 @@ class ESN:
         self.verbose = verbose
 
         # Hyperparameters
-        # these should be fixed during initialization and not changed since they affect
+
+        # the reservoir size and dimension should be fixed during initialization and not changed since they affect
         # the matrix dimensions, and the matrices can become incompatible
         self.N_reservoir = reservoir_size
         self.N_dim = dimension
+
+        # Leak factor
         self.leak_factor = leak_factor
 
         # Biases
@@ -91,14 +94,14 @@ class ESN:
         # N_reservoir+length of output bias because we augment the outputs with a bias
         # if no bias, then this will be + 0
         self.output_weights = jnp.zeros(self.W_out_shape)
-        self._dfdu_const = None
-        self._dudx_const = None
-        self._dfdu_dudx_const = None
-        self._dfdx_x_const = None
+
+        # self._dfdu_const = None
+        # self._dudx_const = None
+        # self._dfdu_dudx_const = None
 
         # self.step = jax.jit(jax.tree_util.Partial(self._step,TRAINING=False))
 
-        self.step_jit = jax.jit(jax.tree_util.Partial(step, [jnp.array(self.norm_in), self.b_in, self.W_in, self.W, self.alpha]))
+        # self.step_jit = jax.jit(jax.tree_util.Partial(step, [jnp.array(self.norm_in), self.b_in, self.W_in, self.W, self.alpha]))
 
     @property
     def reservoir_connectivity(self):
@@ -294,204 +297,168 @@ class ESN:
             return generate_reservoir_weights.erdos_renyi2(self.W_shape, self.sparseness, self.W_seeds)
         else:
             raise ValueError("Not valid reservoir weights generator.")
+        
+    def calculate_constant_jacobian(self):
+        dfdx_x =  self.W
+        # gradient of x(i+1) with x(i) due to u(i) (in closed-loop)
+        dfdx_u = (self.W_in / self.norm_in[1])@self.W_out[: self.N_reservoir, :].T
+        return dfdx_x + dfdx_u
 
-    def open_loop(self, x0, U):
-        """Advances ESN in open-loop.
+def step(params, x_prev, u):
+    #donate args 
+    """Advances ESN time step.
+    Args:
+        x_prev: reservoir state in the previous time step (n-1)
+        u: input in this time step (n)
+    Returns:
+        x: reservoir state in this time step (n)
+    """
+    # normalise the input
+    u_norm = (u - params.norm_in[0]) / params.norm_in[1]
+    # we normalize here, so that the input is normalised
+    # in closed-loop run too
+
+    # augment the input with the input bias
+    u_augmented = jnp.hstack((u_norm, params.b_in))
+
+    # update the reservoir
+    x_tilde = jnp.tanh(jnp.dot(params.W_in,u_augmented) + jnp.dot(params.W,x_prev))
+
+    # apply the leaky integrator
+    x = (1 - params.alpha) * x_prev + params.alpha * x_tilde
+    return x
+    
+def open_loop(params, x0, U):
+    """Advances ESN in open-loop.
         Args:
             x0: initial reservoir state
             U: input time series in matrix form (N_t x N_dim)
 
         Returns:
             X: time series of the reservoir states (N_t x N_reservoir)
-        """
-        N_t = U.shape[0]  # number of time steps
+    """
+    # we write a bodyfunction to apply jax.lax.scan
+    # which implements the for loop
+    def fn_body(x_prev, u):
+        x = step(params, x_prev, u)
+        return x, x
+    
+    x_final, X_preceed = jax.lax.scan(fn_body, x0, U, None)
+    X = jnp.vstack((x0, X_preceed))
+    return x_final, X
 
-        # create an empty matrix to hold the reservoir states in time
-        X = jnp.empty((N_t + 1, self.N_reservoir))
-        # N_t+1 because at t = 0, we don't have input
+def run_washout(params, U_washout):
+    # Wash-out phase to get rid of the effects of reservoir states initialised as zero
+    # initialise the reservoir states before washout
+    x0_washout = jnp.zeros(params.N_reservoir)
 
-        # initialise with the given initial reservoir states
-        X = X.at[0, :].set(x0)
-        # X = [x0]
-        # step in time
-        for n in jnp.arange(1, N_t + 1):
-            X = X.at[n].set(self.step_jit(X[n - 1, :], U[n - 1, :]))
-        return X
+    # let the ESN run in open-loop for the wash-out
+    # get the initial reservoir to start the actual open/closed-loop,
+    # which is the last reservoir state
+    x_final, _ =  open_loop(params, x0=x0_washout, U=U_washout)
+    return x_final
 
-    def before_readout_r1(self, x):
-        # augment with bias before readout
-        return jnp.hstack((x, self.b_out))
+def open_loop_with_washout(params, U_washout, U):
+    x0 = run_washout(params, U_washout)
+    _, X = open_loop(params, x0=x0, U=U)
+    return X
 
-    def before_readout_r2(self, x):
-        # replaces r with r^2 if even, r otherwise
-        x2 = x.copy()
-        x2 = x2.at[1::2].set(x2[1::2] ** 2)
-        return jnp.hstack((x2, self.b_out))
-
-    @property
-    def before_readout(self):
-        if not hasattr(self, "_before_readout"):
-            self._before_readout = self.before_readout_r1
-        return self._before_readout
-
-    def closed_loop(self, x0, N_t):
-        # @todo: make it an option to hold X or just x in memory
-        """Advances ESN in closed-loop.
+def closed_loop(params, x0, N_t):
+    """Advances ESN in closed-loop.
         Args:
             N_t: number of time steps
             x0: initial reservoir state
         Returns:
             X: time series of the reservoir states (N_t x N_reservoir)
             Y: time series of the output (N_t x N_dim)
-        """
-        # create an empty matrix to hold the reservoir states in time
-        X = jnp.empty((N_t + 1, self.N_reservoir))
-        # create an empty matrix to hold the output states in time
-        Y = jnp.empty((N_t + 1, self.N_dim))
+    """
+    x0_augmented = jnp.hstack((x0, params.b_out))
+    y0 = jnp.dot(x0_augmented, params.W_out)
 
-        # initialize with the given initial reservoir states
-        X = X.at[0, :].set(x0)
+    def fn_body(carry, _):
+        x_prev, y_prev = carry
+        x = step(params, x_prev, y_prev)
+        x_augmented = jnp.hstack((x, params.b_out))
+        y = jnp.dot(x_augmented, params.W_out)
+        return (x, y), (x, y)
+    
+    carry0 = (x0, y0)
+    (x_final, y_final), (X_preceed, Y_preceed) = jax.lax.scan(fn_body, carry0, None, length=N_t)
+    X = jnp.vstack((x0, X_preceed))
+    Y = jnp.vstack((y0, Y_preceed))
+    return X, Y
 
-        # augment the reservoir states with the bias
-        x0_augmented = self.before_readout(x0)
-
-        # initialise with the calculated output states
-        Y = Y.at[0, :].set(jnp.dot(x0_augmented, self.W_out))
-
-        # step in time
-        for n in range(1, N_t + 1):
-            # update the reservoir with the feedback from the output
-            X = X.at[n, :].set(self.step_jit(X[n - 1, :], Y[n - 1, :]))
-            # augment the reservoir states with bias
-            x_augmented = self.before_readout(X[n, :])
-
-            # update the output with the reservoir states
-            Y = Y.at[n, :].set(jnp.dot(x_augmented, self.W_out))
-        return X, Y
-
-    def run_washout(self, U_washout):
-        # Wash-out phase to get rid of the effects of reservoir states initialised as zero
-        # initialise the reservoir states before washout
-        x0_washout = jnp.zeros(self.N_reservoir)
-
-        # let the ESN run in open-loop for the wash-out
-        # get the initial reservoir to start the actual open/closed-loop,
-        # which is the last reservoir state
-        x0 = self.open_loop(x0=x0_washout, U=U_washout)[-1, :]
-        return x0
-
-    def open_loop_with_washout(self, U_washout, U):
-        x0 = self.run_washout(U_washout)
-        X = self.open_loop(x0=x0, U=U)
-        return X
-
-    def closed_loop_with_washout(self, U_washout, N_t):
-        x0 = self.run_washout(U_washout)
-        X, Y = self.closed_loop(x0=x0, N_t=N_t)
-        return X, Y
-
-    def solve_ridge(self, X, Y, tikh, ridge_tol=0.0001):
-        """Solves the ridge regression problem
-        Args:
-            X: input data
-            Y: output data
-            tikh: weighing tikhonov coefficient that regularises L2 norm
-        """
-        reg = Ridge(alpha=self.tikh, fit_intercept=False, tol=ridge_tol)
-        reg.fit(X, Y)
-        W_out = reg.coef_.T
-        return W_out
-
-    def reservoir_for_train(self, U_washout, U_train):
-        X_train = self.open_loop_with_washout(U_washout, U_train)
-
-        # X_train is one step longer than U_train and Y_train, we discard the initial state
-        X_train = X_train.at[1:, :].get()
-
-        # augment with the bias
-        N_t = X_train.shape[0]  # number of time steps
-
-        X_train_augmented = jnp.hstack((X_train, self.b_out * jnp.ones((N_t, 1))))
-
-        return X_train_augmented
-
-    def train(self, U_washout, U_train, Y_train, ridge_tol=0.0001):
-        """Trains ESN and sets the output weights.
-        Args:
-            U_washout: washout input time series
-            U_train: training input time series
-            Y_train: training output time series
-            (list of time series if more than one trajectories)
-            tikhonov: regularization coefficient
-            train_idx_list: if list of time series, then which ones to use in training
-                if not specified, all are used
-        """
-        # get the training input
-        # this is the reservoir states augmented with the bias after a washout phase
-        X_train_augmented = self.reservoir_for_train(U_washout, U_train)
-
-        # solve for W_out using ridge regression
-        self.output_weights = self.solve_ridge(X_train_augmented, Y_train, self.tikh, ridge_tol)
-        return
-
-    def dfdu_const(self):
-        if self._dfdu_const is None:
-            try:
-                self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim] * (1.0 / self.norm_in[1][: self.N_dim])
-            except:
-                self._dfdu_const = self.alpha * (self.W_in[:, : self.N_dim] * (1.0 / self.norm_in[1][: self.N_dim]))
-        return self._dfdu_const
-
-    def dudx_const(self):
-        return self.W_out[: self.N_reservoir, :].T
-
-    def dfdu_dudx_const(self):
-        if self._dfdu_dudx_const is None:
-            self._dfdu_dudx_const = jnp.dot(self.dfdu_const(), self.dudx_const())
-        return self._dfdu_dudx_const
-
-    def dfdx_x_const(self):
-        if self._dfdx_x_const is None:
-            self._dfdx_x_const = (1 - self.alpha) * jnp.eye(self.N_reservoir)
-        return self._dfdx_x_const
-
-    def dtanh(self, x, x_prev):
-        x_tilde = (x - (1 - self.alpha) * x_prev) / self.alpha
-        dtanh = 1.0 - x_tilde**2
-        return dtanh
-
-    def dfdx_u(self, dtanh):
-        return jnp.multiply(self.dfdu_dudx_const(), dtanh)
-
-    def jac(self, dtanh, x_prev=None):
-        dfdx_x = self.dfdx_x_const() + self.alpha * self.W * dtanh
-        dfdx = dfdx_x + self.dfdx_u(dtanh)
-        return dfdx
+def closed_loop_with_washout(params, U_washout, N_t):
+    x0 = run_washout(params, U_washout)
+    return closed_loop(params, x0=x0, N_t=N_t)
 
 
-# moved the esn step outside for now to make jitting possible
-def step(esn_attr, x_prev, u):
-    """Advances ESN time step.
+
+def solve_ridge(X, Y, tikh):
+    """Solves the ridge regression problem
     Args:
-        x_prev: reservoir state in the previous time step (n-1)
-        u: input in this time step (n)
-    Returns:
-        x_next: reservoir state in this time step (n)
+        X: input data (N_t x (N_reservoir + N_bias))
+        Y: output data (N_t x N_dim)
+        tikh: weighing tikhonov coefficient that regularises L2 norm
+    Output: W_out of size ((N_reservoir+N_bias) x N_dim)
     """
 
-    [norm_in, b_in, W_in, W, alpha] = esn_attr
+    A = X.T @ X + tikh*jnp.eye(X.shape[1])
+    b = X.T @ Y
+    return jnp.linalg.solve(A, b)
 
-    # normalise the input
-    u_norm = (u - norm_in[0]) / norm_in[1]
-    # we normalize here, so that the input is normalised
-    # in closed-loop run too
+def train(params, U_washout, U_train, Y_train, tikh):
+    """Trains ESN and sets the output weights.
+    Args:
+        U_washout: washout input time series
+        U_train: training input time series
+        Y_train: training output time series
+        (list of time series if more than one trajectories)
+        tikhonov: regularization coefficient
+        train_idx_list: if list of time series, then which ones to use in training
+            if not specified, all are used
+    """
+    # get the training input
+    # reservoir train is one step longer than U_train and Y_train, we discard the initial state
+    X_train = open_loop_with_washout(params, U_washout, U_train)[1:, :]
 
-    # augment the input with the input bias
-    u_augmented = jnp.hstack((u_norm, b_in))
+    # this is the reservoir states augmented with the bias after a washout phase, one bias per time step
+    X_train_augmented = jnp.hstack((X_train, params.b_out * jnp.ones((X_train.shape[0], 1))))
 
-    # update the reservoir
-    x_tilde = jnp.tanh(W_in.dot(u_augmented) + W.dot(x_prev))
+    # solve for W_out using linalg solve
+    return solve_ridge(X_train_augmented, Y_train, tikh)
 
-    # apply the leaky integrator
-    x = (1 - alpha) * x_prev + alpha * x_tilde
-    return x
+    # def make_step(esn_attr):
+    #     return jax.jit(jax.tree_util.Partial(step, esn_attr))
+
+    # def dfdu_const(self):
+    #     if self._dfdu_const is None:
+    #         try:
+    #             self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim] * (1.0 / self.norm_in[1][: self.N_dim])
+    #         except:
+    #             self._dfdu_const = self.alpha * (self.W_in[:, : self.N_dim] * (1.0 / self.norm_in[1][: self.N_dim]))
+    #     return self._dfdu_const
+
+    # def dudx_const(self):
+    #     return self.W_out[: self.N_reservoir, :].T
+
+    # def dfdu_dudx_const(self):
+    #     if self._dfdu_dudx_const is None:
+    #         self._dfdu_dudx_const = jnp.dot(self.dfdu_const(), self.W_out[: self.N_reservoir, :].T)
+    #     return self._dfdu_dudx_const
+
+
+    # def dtanh(self, x, x_prev):
+    #     x_tilde = (x - (1 - self.alpha) * x_prev) / self.alpha
+    #     dtanh = 1.0 - x_tilde**2
+    #     return dtanh
+
+    # def dfdx_u(self, dtanh):
+    #     return jnp.multiply(self.dfdu_dudx_const(), dtanh)
+
+    # def jac(self, dtanh, x_prev=None):
+    #     dfdx_x = (1 - self.alpha) * jnp.eye(self.N_reservoir) + self.alpha * self.W * dtanh
+    #     dfdx = dfdx_x + self.dfdx_u(dtanh)
+    #     return dfdx
+
+
