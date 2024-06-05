@@ -1,68 +1,66 @@
+
+import functools
+import jax
 import jax.numpy as jnp
-from jax import jit, random
-from jax.scipy.linalg import qr
 
+from jax import config
+config.update("jax_enable_x64", True)
 
+def calculate_LEs_jax(
+        esn_jacobian_jax, reservoir, N_transient, dt, norm_step=1, target_dim=None, randomseed=0
+    ):
+        """Calculate the Lyapunov exponents
+        Args:
+            sys: system object that contains the governing equations and jacobian
+            sys_type: whether system is continuous time or an ESN
+            X: state trajectory
+            t: time
+            target_dim: dimension of the target system, valid for ESN
+            transient_time: number of transient time steps
+            dt: time steps
+        Returns:
+            LEs: Lyapunov exponents
+            QQ: Q matrix recorded in time
+            RR: R matrix recorded in time
+            QQ, RR can be used for the computation of Covariant Lyapunov Vectors
+        """
+        # total number of time steps
+        N = reservoir.shape[0]
+        # number of transient steps that will be discarded
+        # number of qr normalization steps
+        N_qr = int(jnp.ceil((N  - N_transient) / norm_step))
+        T = jnp.arange(1, N_qr + 1) * dt * norm_step
 
-def ESN_variation(sys, u, u_prev, M):
-    """Variation of the ESN.
-    Evolution in the tangent space.
-    """
-    dtanh_val = sys.dtanh(u, u_prev)[:, None]
-    # jacobian of the reservoir dynamics
-    jac_val = sys.jac(dtanh_val, u_prev)
-    M_next = jnp.matmul(jac_val, M)  # because ESN discrete time map
-    return M_next
+        # dimension of the system
+        dim = reservoir.shape[1]
+        if target_dim is None:
+            target_dim = dim
+        FTLE=0
+        # set random orthonormal Lyapunov vectors (GSVs)
+        key = jax.random.PRNGKey(randomseed)
+        U = jnp.linalg.qr(jax.random.normal(key, (dim, target_dim)))[0]
+        Q, R =  jnp.linalg.qr(U)
+        U = Q[:, :target_dim]
+        
+        def var_equation(n, idx, U):
+            def body(carry, _):
+                idx, U_current = carry
+                jac = jnp.multiply(esn_jacobian_jax , 1.0 - reservoir[idx]**2)
+                U_new= jnp.matmul(jac, U_current) 
+                U_new, R =  jax.scipy.linalg.qr(U_new[:, :target_dim], mode="economic")
+                idx = idx+1
+                return (idx, U_new), (U_new, R, jnp.abs(jnp.diag(R[:target_dim, :target_dim])))
 
+            (idx, U), (U_all, R_all, LE_all) = jax.lax.scan(body, (idx, U), xs=None, length=n)
+            return idx, U, (U_all, R_all, LE_all)
 
-def calculate_LEs_less_storage(
-    sys, sys_type, X, t, N_transient, dt, norm_step=1, target_dim=None
-):
-    """Calculate the Lyapunov exponents but doesn't save Q or R
-    Args:
-        sys: system object that contains the governing equations and jacobian
-        sys_type: whether system is continuous time or an ESN
-        X: state trajectory if continuous or reservoir if ESN
-        t: time
-        target_dim: dimension of the target system, valid for ESN
-        dt: time steps
-    Returns:
-        LEs: Lyapunov exponents
-        QQ, RR can be used for the computation of Covariant Lyapunov Vectors
-    """
-    # total number of time steps
-    N = X.shape[0]
-    # number of transient steps that will be discarded
-    # number of qr normalization steps
-    N_qr = int(jnp.ceil((N - 1 - N_transient) / norm_step))
-    T = jnp.arange(1, N_qr + 1) * dt * norm_step
+        idx, U, _ = var_equation(N_transient, 0, U)
+        idx, U, (U_tracked, R_tracked, LEs_tracked) = var_equation(N-N_transient, idx, U)
 
-    # dimension of the system
-    dim = X.shape[1]
-    if target_dim is None:
-        target_dim = dim
+        LEs = jnp.cumsum(jnp.log(LEs_tracked[:]), axis=0) / jnp.tile(T[:], (target_dim, 1)).T
 
-    # Lyapunov Exponents timeseries
-    LE = jnp.zeros((N_qr, target_dim))
-    # finite-time Lyapunov Exponents timeseries
-    FTLE = jnp.zeros((N_qr, target_dim))
-    # set random orthonormal Lyapunov vectors (GSVs)
-    key = random.PRNGKey(0)
-    U = jnp.linalg.qr(random.normal(key, (dim, target_dim)))[0]
-    Q, R =  jnp.linalg.qr(U)
-    U = Q[:, :target_dim]
+        # idx, U, (U_tracked, R_tracked, LEs_tracked) = var_equation(N, 0, U)
 
-    idx = 0
-    for i in range(1, N):
-        U = ESN_variation(sys, X[i], X[i - 1], U)
+        # LEs = jnp.cumsum(jnp.log(LEs_tracked[N_transient:]), axis=0) / jnp.tile(T[:], (target_dim, 1)).T
+        return LEs
 
-        if i % norm_step == 0:
-            Q, R =  jnp.linalg.qr(U)
-            U = Q[:, :target_dim]
-            if i > N_transient:
-                LE = LE.at[idx].set(jnp.abs(jnp.diag(R[:target_dim, :target_dim])))
-                FTLE = FTLE.at[idx].set((1.0 / dt) * jnp.log(LE[idx]))
-                idx += 1
-
-    LEs = jnp.cumsum(jnp.log(LE[:]), axis=0) / jnp.tile(T[:], (target_dim, 1)).T
-    return LEs, FTLE
