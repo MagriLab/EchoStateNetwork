@@ -393,7 +393,6 @@ def closed_loop_with_washout(params, U_washout, N_t):
     return closed_loop(params, x0=x0, N_t=N_t)
 
 
-
 def solve_ridge(X, Y, tikh):
     """Solves the ridge regression problem
     Args:
@@ -427,6 +426,34 @@ def train(params, U_washout, U_train, Y_train, tikh):
 
     # solve for W_out using linalg solve
     return solve_ridge(X_train_augmented, Y_train, tikh)
+
+def train_mem(params, U_washout, U_train, Y_train, tikh, N_splits):
+    # initial washout
+    x0 = run_washout(params, U_washout)
+
+    # body function
+    # we can split the operations (in timesteps) required for training 
+    # so we don't need to store a large matrix for X and do the X.T @ X operation
+    def fn_body(carry, UY):
+        U, Y = UY
+        x0, LHS, RHS = carry
+        xf, X = open_loop(params, x0, U) 
+        X_augmented = jnp.hstack((X, params.b_out * jnp.ones((X.shape[0], 1))))
+        LHS += X_augmented[1:].T @ X_augmented[1:]
+        RHS += X_augmented[1:].T @ Y
+        return (xf, LHS, RHS), None
+    
+    carry0 = (x0, jnp.zeros((params.N_reservoir,params.N_reservoir)), jnp.zeros((params.N_reservoir,params.N_dim)))
+    U_train_split = jnp.reshape(U_train, (N_splits, U_train.shape[0]//N_splits, U_train.shape[1]))
+    Y_train_split = jnp.reshape(Y_train, (N_splits, Y_train.shape[0]//N_splits, Y_train.shape[1]))
+    (_, LHS, RHS), _ = jax.lax.scan(fn_body, carry0, (U_train_split, Y_train_split), length=N_splits)
+
+    # two options to add the tikhonov coefficient to the diagonal
+    # need to test which one is better
+    # the second avoids creating a large matrix for tikhonov
+    # reg_LHS = LHS + tikh*jnp.eye(LHS.shape[1])
+    LHS = jnp.reshape(LHS, -1).at[::LHS.shape[1]+1].add(tikh).reshape(*LHS.shape)
+    return jnp.linalg.solve(LHS, RHS)
 
     # def make_step(esn_attr):
     #     return jax.jit(jax.tree_util.Partial(step, esn_attr))
