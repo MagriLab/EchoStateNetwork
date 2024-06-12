@@ -43,7 +43,7 @@ def sparse_grouped(W_in_shape: tuple, W_in_seeds: list):
     """
 
     W_in = jnp.zeros(W_in_shape)
-    rnd0 = jax.random.split(jax.random.PRNGKey(W_in_seeds[0]), 1)
+    rnd0 = jax.random.PRNGKey(W_in_seeds[0])
 
     # Generate row and column indices
     row_idx = jnp.arange(0, W_in.shape[0])
@@ -69,7 +69,7 @@ def dense(W_in_shape: tuple, W_in_seeds: list):
     """
 
     # Generate random matrix with uniform values
-    rnd_key = jax.random.split(jax.random.PRNGKey(W_in_seeds[0]), 1)
+    rnd_key = jax.random.PRNGKey(W_in_seeds[0])
     W_in = jax.random.uniform(rnd_key, shape=W_in_shape, minval=-1.0, maxval=1.0)
 
     return W_in
