@@ -227,8 +227,7 @@ class ESN:
         # first check the dimensions
         if new_reservoir_weights.shape != self.W_shape:
             raise ValueError(
-                f"The shape of the provided reservoir weights does not match with the network,"
-                f"{new_reservoir_weights.shape} != {self.W_shape}"
+                f"The shape of the provided reservoir weights does not match with the network," f"{new_reservoir_weights.shape} != {self.W_shape}"
             )
 
         # set the new reservoir weights
@@ -249,8 +248,7 @@ class ESN:
         # first check the dimensions
         if new_output_weights.shape != self.W_out_shape:
             raise ValueError(
-                f"The shape of the provided output weights does not match with the network,"
-                f"{new_output_weights.shape} != {self.W_out_shape}"
+                f"The shape of the provided output weights does not match with the network," f"{new_output_weights.shape} != {self.W_out_shape}"
             )
         # set the new reservoir weights
         self.W_out = new_output_weights
@@ -284,13 +282,9 @@ class ESN:
 
     def generate_input_weights(self):
         if self.input_weights_mode == "sparse_random":
-            return generate_input_weights.sparse_random(
-                self.W_in_shape, self.W_in_seeds
-            )
+            return generate_input_weights.sparse_random(self.W_in_shape, self.W_in_seeds)
         elif self.input_weights_mode == "sparse_grouped":
-            return generate_input_weights.sparse_grouped(
-                self.W_in_shape, self.W_in_seeds
-            )
+            return generate_input_weights.sparse_grouped(self.W_in_shape, self.W_in_seeds)
         elif self.input_weights_mode == "dense":
             return generate_input_weights.dense(self.W_in_shape, self.W_in_seeds)
         else:
@@ -298,13 +292,9 @@ class ESN:
 
     def generate_reservoir_weights(self):
         if self.reservoir_weights_mode == "erdos_renyi1":
-            return generate_reservoir_weights.erdos_renyi1(
-                self.W_shape, self.sparseness, self.W_seeds
-            )
+            return generate_reservoir_weights.erdos_renyi1(self.W_shape, self.sparseness, self.W_seeds)
         if self.reservoir_weights_mode == "erdos_renyi2":
-            return generate_reservoir_weights.erdos_renyi2(
-                self.W_shape, self.sparseness, self.W_seeds
-            )
+            return generate_reservoir_weights.erdos_renyi2(self.W_shape, self.sparseness, self.W_seeds)
         else:
             raise ValueError("Not valid reservoir weights generator.")
 
@@ -486,9 +476,7 @@ class ESN:
             if train_idx_list is None:
                 train_idx_list = range(len(U_train))
             for train_idx in train_idx_list:
-                X_train_augmented_ = self.reservoir_for_train(
-                    U_washout[train_idx], U_train[train_idx]
-                )
+                X_train_augmented_ = self.reservoir_for_train(U_washout[train_idx], U_train[train_idx])
                 X_train_augmented = np.vstack((X_train_augmented, X_train_augmented_))
 
             Y_train = [Y_train[train_idx] for train_idx in train_idx_list]
@@ -506,13 +494,9 @@ class ESN:
         # sparse matrix
         if not hasattr(self, "_dfdu_const"):
             try:
-                self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim].multiply(
-                    1.0 / self.norm_in[1][: self.N_dim]
-                )
+                self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim].multiply(1.0 / self.norm_in[1][: self.N_dim])
             except:
-                self._dfdu_const = self.alpha * np.multiply(
-                    self.W_in[:, : self.N_dim], 1.0 / self.norm_in[1][: self.N_dim]
-                )
+                self._dfdu_const = self.alpha * np.multiply(self.W_in[:, : self.N_dim], 1.0 / self.norm_in[1][: self.N_dim])
         return self._dfdu_const
 
     @property
@@ -603,15 +587,14 @@ class ESN:
         dfdx = dfdx_x + dfdx_u
         return dfdx
 
-
     def calculate_constant_jacobian(self):
-        """Jacobian of the reservoir states in its minimal representation 
+        """Jacobian of the reservoir states in its minimal representation
         Returns:
         dfdx: jacobian of the reservoir states
         """
-        #issue W_in dense no need toarray
-        dfdx_x =  self.W.toarray()
+        # issue W_in dense no need toarray
+        dfdx_x = self.W.toarray()
         # gradient of x(i+1) with x(i) due to u(i) (in closed-loop)
-        dfdx_u = (self.W_in[:, : self.N_dim] / self.norm_in[1])@self.W_out[: self.N_reservoir, :].T
+        dfdx_u = (self.W_in[:, : self.N_dim] / self.norm_in[1]) @ self.W_out[: self.N_reservoir, :].T
         esn_jacobian = dfdx_x + dfdx_u
         return esn_jacobian

@@ -49,12 +49,8 @@ def continuous_tangent_step(ddt, jac, u, M, t):
 def rk4var_step(ddt, jac, u, M, t, dt, *args):
     """Variational step with RK4 method"""
     K1, M_K1 = continuous_tangent_step(ddt, jac, u, M, t)
-    K2, M_K2 = continuous_tangent_step(
-        ddt, jac, u + dt * K1 / 2.0, M + dt * M_K1 / 2.0, t + dt / 2.0
-    )
-    K3, M_K3 = continuous_tangent_step(
-        ddt, jac, u + dt * K2 / 2.0, M + dt * M_K2 / 2.0, t + dt / 2.0
-    )
+    K2, M_K2 = continuous_tangent_step(ddt, jac, u + dt * K1 / 2.0, M + dt * M_K1 / 2.0, t + dt / 2.0)
+    K3, M_K3 = continuous_tangent_step(ddt, jac, u + dt * K2 / 2.0, M + dt * M_K2 / 2.0, t + dt / 2.0)
     K4, M_K4 = continuous_tangent_step(ddt, jac, u + dt * K3, M + dt * M_K3, t + dt)
 
     du = dt * (K1 / 2.0 + K2 + K3 + K4 / 2.0) / 3.0
@@ -80,9 +76,7 @@ def ESN_variation(sys, u, u_prev, M):
     return M_next
 
 
-def calculate_LEs_less_storage(
-    sys, sys_type, X, t, N_transient, dt, norm_step=1, target_dim=None
-):
+def calculate_LEs_less_storage(sys, sys_type, X, t, N_transient, dt, norm_step=1, target_dim=None):
     """Calculate the Lyapunov exponents
     Args:
         sys: system object that contains the governing equations and jacobian
@@ -217,9 +211,7 @@ def CLV_angles(clv, target_dim):
 
         # For principal angles take the absolute of the dot product
         # take dot product of CLVs at each time step and collect
-        costhetas[:, count] = np.absolute(
-            timeseriesdot(clv[:, index1, :], clv[:, index2, :], "ij,ji->j")
-        )
+        costhetas[:, count] = np.absolute(timeseriesdot(clv[:, index1, :], clv[:, index2, :], "ij,ji->j"))
         count += 1
     thetas = 180.0 * np.arccos(costhetas) / np.pi
 
@@ -247,13 +239,9 @@ def calculate_CLVs(QQ, RR, dt):
     dim = QQ.shape[0]
     target_dim = QQ.shape[1]
 
-    C = np.zeros(
-        (target_dim, target_dim, N)
-    )  # coordinates of CLVs in local GS vector basis
+    C = np.zeros((target_dim, target_dim, N))  # coordinates of CLVs in local GS vector basis
     D = np.zeros((target_dim, N))  # diagonal matrix with CLV growth factors
-    V = np.zeros(
-        (dim, target_dim, N)
-    )  # coordinates of CLVs in physical space (each column is a vector)
+    V = np.zeros((dim, target_dim, N))  # coordinates of CLVs in physical space (each column is a vector)
 
     C[:, :, -1] = np.eye(target_dim)
     D[:, -1] = np.ones(target_dim)
@@ -261,9 +249,7 @@ def calculate_CLVs(QQ, RR, dt):
 
     # integrate backwards
     for i in reversed(range(N - 1)):
-        C[:, :, i], D[:, i] = normalize(
-            scipy.linalg.solve_triangular(np.real(RR[:, :, i]), C[:, :, i + 1])
-        )
+        C[:, :, i], D[:, i] = normalize(scipy.linalg.solve_triangular(np.real(RR[:, :, i]), C[:, :, i + 1]))
         V[:, :, i] = np.dot(np.real(QQ[:, :, i]), C[:, :, i])
 
     # normalize CLVs

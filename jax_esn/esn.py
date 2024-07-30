@@ -297,15 +297,16 @@ class ESN:
             return generate_reservoir_weights.erdos_renyi2(self.W_shape, self.sparseness, self.W_seeds)
         else:
             raise ValueError("Not valid reservoir weights generator.")
-        
+
     def calculate_constant_jacobian(self):
-        dfdx_x =  self.W
+        dfdx_x = self.W
         # gradient of x(i+1) with x(i) due to u(i) (in closed-loop)
-        dfdx_u = (self.W_in / self.norm_in[1])@self.W_out[: self.N_reservoir, :].T
+        dfdx_u = (self.W_in / self.norm_in[1]) @ self.W_out[: self.N_reservoir, :].T
         return dfdx_x + dfdx_u
 
+
 def step(params, x_prev, u):
-    #donate args 
+    # donate args
     """Advances ESN time step.
     Args:
         x_prev: reservoir state in the previous time step (n-1)
@@ -322,30 +323,33 @@ def step(params, x_prev, u):
     u_augmented = jnp.hstack((u_norm, params.b_in))
 
     # update the reservoir
-    x_tilde = jnp.tanh(jnp.dot(params.W_in,u_augmented) + jnp.dot(params.W,x_prev))
+    x_tilde = jnp.tanh(jnp.dot(params.W_in, u_augmented) + jnp.dot(params.W, x_prev))
 
     # apply the leaky integrator
     x = (1 - params.alpha) * x_prev + params.alpha * x_tilde
     return x
-    
+
+
 def open_loop(params, x0, U):
     """Advances ESN in open-loop.
-        Args:
-            x0: initial reservoir state
-            U: input time series in matrix form (N_t x N_dim)
+    Args:
+        x0: initial reservoir state
+        U: input time series in matrix form (N_t x N_dim)
 
-        Returns:
-            X: time series of the reservoir states (N_t x N_reservoir)
+    Returns:
+        X: time series of the reservoir states (N_t x N_reservoir)
     """
+
     # we write a bodyfunction to apply jax.lax.scan
     # which implements the for loop
     def fn_body(x_prev, u):
         x = step(params, x_prev, u)
         return x, x
-    
+
     x_final, X_preceed = jax.lax.scan(fn_body, x0, U, None)
     X = jnp.vstack((x0, X_preceed))
     return x_final, X
+
 
 def run_washout(params, U_washout):
     # Wash-out phase to get rid of the effects of reservoir states initialised as zero
@@ -355,22 +359,24 @@ def run_washout(params, U_washout):
     # let the ESN run in open-loop for the wash-out
     # get the initial reservoir to start the actual open/closed-loop,
     # which is the last reservoir state
-    x_final, _ =  open_loop(params, x0=x0_washout, U=U_washout)
+    x_final, _ = open_loop(params, x0=x0_washout, U=U_washout)
     return x_final
+
 
 def open_loop_with_washout(params, U_washout, U):
     x0 = run_washout(params, U_washout)
     _, X = open_loop(params, x0=x0, U=U)
     return X
 
+
 def closed_loop(params, x0, N_t):
     """Advances ESN in closed-loop.
-        Args:
-            N_t: number of time steps
-            x0: initial reservoir state
-        Returns:
-            X: time series of the reservoir states (N_t x N_reservoir)
-            Y: time series of the output (N_t x N_dim)
+    Args:
+        N_t: number of time steps
+        x0: initial reservoir state
+    Returns:
+        X: time series of the reservoir states (N_t x N_reservoir)
+        Y: time series of the output (N_t x N_dim)
     """
     x0_augmented = jnp.hstack((x0, params.b_out))
     y0 = jnp.dot(x0_augmented, params.W_out)
@@ -381,12 +387,13 @@ def closed_loop(params, x0, N_t):
         x_augmented = jnp.hstack((x, params.b_out))
         y = jnp.dot(x_augmented, params.W_out)
         return (x, y), (x, y)
-    
+
     carry0 = (x0, y0)
     (x_final, y_final), (X_preceed, Y_preceed) = jax.lax.scan(fn_body, carry0, None, length=N_t)
     X = jnp.vstack((x0, X_preceed))
     Y = jnp.vstack((y0, Y_preceed))
     return X, Y
+
 
 def closed_loop_with_washout(params, U_washout, N_t):
     x0 = run_washout(params, U_washout)
@@ -402,9 +409,10 @@ def solve_ridge(X, Y, tikh):
     Output: W_out of size ((N_reservoir+N_bias) x N_dim)
     """
 
-    A = X.T @ X + tikh*jnp.eye(X.shape[1])
+    A = X.T @ X + tikh * jnp.eye(X.shape[1])
     b = X.T @ Y
     return jnp.linalg.solve(A, b)
+
 
 def train(params, U_washout, U_train, Y_train, tikh):
     """Trains ESN and sets the output weights.
@@ -427,32 +435,33 @@ def train(params, U_washout, U_train, Y_train, tikh):
     # solve for W_out using linalg solve
     return solve_ridge(X_train_augmented, Y_train, tikh)
 
+
 def train_mem(params, U_washout, U_train, Y_train, tikh, N_splits):
     # initial washout
     x0 = run_washout(params, U_washout)
 
     # body function
-    # we can split the operations (in timesteps) required for training 
+    # we can split the operations (in timesteps) required for training
     # so we don't need to store a large matrix for X and do the X.T @ X operation
     def fn_body(carry, UY):
         U, Y = UY
         x0, LHS, RHS = carry
-        xf, X = open_loop(params, x0, U) 
+        xf, X = open_loop(params, x0, U)
         X_augmented = jnp.hstack((X, params.b_out * jnp.ones((X.shape[0], 1))))
         LHS += X_augmented[1:].T @ X_augmented[1:]
         RHS += X_augmented[1:].T @ Y
         return (xf, LHS, RHS), None
-    
-    carry0 = (x0, jnp.zeros((params.N_reservoir,params.N_reservoir)), jnp.zeros((params.N_reservoir,params.N_dim)))
-    U_train_split = jnp.reshape(U_train, (N_splits, U_train.shape[0]//N_splits, U_train.shape[1]))
-    Y_train_split = jnp.reshape(Y_train, (N_splits, Y_train.shape[0]//N_splits, Y_train.shape[1]))
+
+    carry0 = (x0, jnp.zeros((params.N_reservoir, params.N_reservoir)), jnp.zeros((params.N_reservoir, params.N_dim)))
+    U_train_split = jnp.reshape(U_train, (N_splits, U_train.shape[0] // N_splits, U_train.shape[1]))
+    Y_train_split = jnp.reshape(Y_train, (N_splits, Y_train.shape[0] // N_splits, Y_train.shape[1]))
     (_, LHS, RHS), _ = jax.lax.scan(fn_body, carry0, (U_train_split, Y_train_split), length=N_splits)
 
     # two options to add the tikhonov coefficient to the diagonal
     # need to test which one is better
     # the second avoids creating a large matrix for tikhonov
     # reg_LHS = LHS + tikh*jnp.eye(LHS.shape[1])
-    LHS = jnp.reshape(LHS, -1).at[::LHS.shape[1]+1].add(tikh).reshape(*LHS.shape)
+    LHS = jnp.reshape(LHS, -1).at[:: LHS.shape[1] + 1].add(tikh).reshape(*LHS.shape)
     return jnp.linalg.solve(LHS, RHS)
 
     # def make_step(esn_attr):
@@ -474,7 +483,6 @@ def train_mem(params, U_washout, U_train, Y_train, tikh, N_splits):
     #         self._dfdu_dudx_const = jnp.dot(self.dfdu_const(), self.W_out[: self.N_reservoir, :].T)
     #     return self._dfdu_dudx_const
 
-
     # def dtanh(self, x, x_prev):
     #     x_tilde = (x - (1 - self.alpha) * x_prev) / self.alpha
     #     dtanh = 1.0 - x_tilde**2
@@ -487,5 +495,3 @@ def train_mem(params, U_washout, U_train, Y_train, tikh, N_splits):
     #     dfdx_x = (1 - self.alpha) * jnp.eye(self.N_reservoir) + self.alpha * self.W * dtanh
     #     dfdx = dfdx_x + self.dfdx_u(dtanh)
     #     return dfdx
-
-
