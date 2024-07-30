@@ -3,6 +3,8 @@ from sklearn.linear_model import Ridge
 
 import esn.generate_input_weights as generate_input_weights
 import esn.generate_reservoir_weights as generate_reservoir_weights
+from scipy.sparse import csr_matrix
+
 
 class ESN:
     def __init__(
@@ -21,9 +23,8 @@ class ESN:
         reservoir_seeds=[None, None],
         verbose=True,
         r2_mode=False,
-        input_only_mode=False,
-        input_weights_mode="sparse_grouped",
-        reservoir_weights_mode="erdos_renyi2",
+        input_weights_mode="sparse_random",
+        reservoir_weights_mode="erdos_renyi1",
     ):
         """Creates an Echo State Network with the given parameters
         Args:
@@ -48,7 +49,6 @@ class ESN:
         """
         self.verbose = verbose
         self.r2_mode = r2_mode
-        self.input_only_mode = input_only_mode
 
         # Hyperparameters
         # these should be fixed during initialization and not changed since they affect
@@ -73,10 +73,7 @@ class ESN:
         # the object should also store the seeds for reproduction
         # initialise input weights
         self.W_in_seeds = input_seeds
-        self.W_in_shape = (
-            self.N_reservoir,
-            self.N_dim + len(self.input_bias)
-        )
+        self.W_in_shape = (self.N_reservoir, self.N_dim + len(self.input_bias))
         # N_dim+length of input bias because we augment the inputs with a bias
         # if no bias, then this will be + 0
         self.input_weights_mode = input_weights_mode
@@ -86,25 +83,25 @@ class ESN:
         # input weights are automatically scaled if input scaling is updated
 
         # initialise reservoir weights
-        if not self.input_only_mode:
-            self.reservoir_connectivity = reservoir_connectivity
-            self.W_seeds = reservoir_seeds
-            self.W_shape = (self.N_reservoir, self.N_reservoir)
-            self.reservoir_weights_mode = reservoir_weights_mode
-            valid_W = False
-            while not valid_W:
-                try:
-                    self.reservoir_weights = self.generate_reservoir_weights()
-                    valid_W = True
-                except:
-                    # perturb the seeds
-                    for i in range(2):
-                        if self.W_seeds[i]:
-                            self.W_seeds[i] = self.W_seeds[i] + 1
-                    valid_W = False
-                    print("Not valid reservoir encountered, changing seed.")
-            self.spectral_radius = spectral_radius
-            # reservoir weights are automatically scaled if spectral radius is updated
+
+        self.reservoir_connectivity = reservoir_connectivity
+        self.W_seeds = reservoir_seeds
+        self.W_shape = (self.N_reservoir, self.N_reservoir)
+        self.reservoir_weights_mode = reservoir_weights_mode
+        valid_W = False
+        while not valid_W:
+            try:
+                self.reservoir_weights = self.generate_reservoir_weights()
+                valid_W = True
+            except:
+                # perturb the seeds
+                for i in range(2):
+                    if self.W_seeds[i]:
+                        self.W_seeds[i] = self.W_seeds[i] + 1
+                valid_W = False
+                print("Not valid reservoir encountered, changing seed.")
+        self.spectral_radius = spectral_radius
+        # reservoir weights are automatically scaled if spectral radius is updated
 
         # initialise output weights
         self.W_out_shape = (self.N_reservoir + len(self.output_bias), self.N_dim)
@@ -139,7 +136,6 @@ class ESN:
         if new_leak_factor < 0 or new_leak_factor > 1:
             raise ValueError("Leak factor must be between 0 and 1 (including).")
         self.alpha = new_leak_factor
-   
 
     @property
     def tikhonov(self):
@@ -151,7 +147,6 @@ class ESN:
         if new_tikhonov <= 0:
             raise ValueError("Tikhonov coefficient must be greater than 0.")
         self.tikh = new_tikhonov
-
 
     @property
     def input_normalization(self):
@@ -194,6 +189,7 @@ class ESN:
         if hasattr(self, "rho"):
             # rescale the reservoir matrix
             self.W = (1 / self.rho) * self.W
+
         # set spectral radius
         self.rho = new_spectral_radius
         if self.verbose:
@@ -329,10 +325,7 @@ class ESN:
         u_augmented = np.hstack((u_norm, self.b_in))
 
         # update the reservoir
-        if self.input_only_mode:
-            x_tilde = np.tanh(self.W_in.dot(u_augmented))
-        else:
-            x_tilde = np.tanh(self.W_in.dot(u_augmented) + self.W.dot(x_prev))
+        x_tilde = np.tanh(self.W_in.dot(u_augmented) + self.W.dot(x_prev))
 
         # apply the leaky integrator
         x = (1 - self.alpha) * x_prev + self.alpha * x_tilde
@@ -493,7 +486,9 @@ class ESN:
             if train_idx_list is None:
                 train_idx_list = range(len(U_train))
             for train_idx in train_idx_list:
-                X_train_augmented_ = self.reservoir_for_train(U_washout[train_idx], U_train[train_idx])
+                X_train_augmented_ = self.reservoir_for_train(
+                    U_washout[train_idx], U_train[train_idx]
+                )
                 X_train_augmented = np.vstack((X_train_augmented, X_train_augmented_))
 
             Y_train = [Y_train[train_idx] for train_idx in train_idx_list]
@@ -504,3 +499,119 @@ class ESN:
         # solve for W_out using ridge regression
         self.output_weights = self.solve_ridge(X_train_augmented, Y_train, self.tikh)
         return
+
+    @property
+    def dfdu_const(self):
+        # constant part of gradient of x(i+1) with respect to u_in(i)
+        # sparse matrix
+        if not hasattr(self, "_dfdu_const"):
+            try:
+                self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim].multiply(
+                    1.0 / self.norm_in[1][: self.N_dim]
+                )
+            except:
+                self._dfdu_const = self.alpha * np.multiply(
+                    self.W_in[:, : self.N_dim], 1.0 / self.norm_in[1][: self.N_dim]
+                )
+        return self._dfdu_const
+
+    @property
+    def dudx_const(self):
+        # gradient of u_in(i) with respect to x(i)
+        # not sparse matrix
+        return self.W_out[: self.N_reservoir, :].T
+
+    @property
+    def dfdu_dudx_const(self):
+        # constant part of gradient of x(i+1) with respect to x(i) due to u_in(i)
+        # not sparse matrix
+        if not hasattr(self, "_dfdu_dudx_const"):
+            self._dfdu_dudx_const = self.dfdu_const.dot(self.dudx_const)
+        return self._dfdu_dudx_const
+
+    @property
+    def dfdx_x_const(self):
+        # constant part of gradient of x(i+1) with respect to x(i) due to x(i)
+        # sparse matrix
+        if not hasattr(self, "_dfdx_x_const"):
+            self._dfdx_x_const = csr_matrix((1 - self.alpha) * np.eye(self.N_reservoir))
+        return self._dfdx_x_const
+
+    def dtanh(self, x, x_prev):
+        """Derivative of the tanh part
+        This derivative appears in different gradient calculations
+        So, it makes sense to calculate it only once and call as required
+
+        Args:
+        x: reservoir states at time i+1, x(i+1)
+        x_prev: reservoir states at time i, x(i)
+        """
+        # first we find tanh(...)
+        x_tilde = (x - (1 - self.alpha) * x_prev) / self.alpha
+
+        # derivative of tanh(...) is 1-tanh**2(...)
+        dtanh = 1.0 - x_tilde**2
+
+        return dtanh
+
+    def dfdx_u_r1(self, dtanh, x_prev=None):
+        return np.multiply(self.dfdu_dudx_const, dtanh)
+
+    def dfdx_u_r2(self, dtanh, x_prev=None):
+        # derivative of x**2 terms
+        dx_prev = np.ones(self.N_reservoir)
+        dx_prev[1::2] = 2 * x_prev[1::2]
+
+        dudx = np.multiply(self.dudx_const, dx_prev)
+        dfdu_dudx = self.dfdu_const.dot(dudx)
+        return np.multiply(dfdu_dudx, dtanh)
+
+    @property
+    def dfdx_u(self):
+        if not hasattr(self, "_dfdx_u"):
+            if self.r2_mode:
+                self._dfdx_u = self.dfdx_u_r2
+            else:
+                self._dfdx_u = self.dfdx_u_r1
+        return self._dfdx_u
+
+    def jac(self, dtanh, x_prev=None):
+        """Jacobian of the reservoir states, ESN in closed loop
+        taken from
+        Georgios Margazoglou, Luca Magri:
+        Stability analysis of chaotic systems from data, arXiv preprint arXiv:2210.06167
+
+        x(i+1) = f(x(i),u(i),p)
+        df(x(i),u(i))/dx(i) = \partial f/\partial x(i) + \partial f/\partial u(i)*\partial u(i)/\partial x(i)
+
+        x(i+1) = (1-alpha)*x(i)+alpha*tanh(W_in*[u(i);p]+W*x(i))
+
+        Args:
+        dtanh: derivative of tanh at x(i+1), x(i)
+
+        Returns:
+        dfdx: jacobian of the reservoir states
+        """
+
+        # gradient of x(i+1) with x(i) due to x(i) that appears explicitly
+        # no reservoir connections
+        dfdx_x = self.dfdx_x_const
+        dfdx_x += self.alpha * self.W.multiply(dtanh)
+        # gradient of x(i+1) with x(i) due to u(i) (in closed-loop)
+        dfdx_u = self.dfdx_u(dtanh, x_prev)
+        # total derivative
+        dfdx = dfdx_x + dfdx_u
+        return dfdx
+
+
+    def calculate_constant_jacobian(self):
+        """Jacobian of the reservoir states in its minimal representation 
+        Returns:
+        dfdx: jacobian of the reservoir states
+        """
+        #issue W_in dense no need toarray
+        dfdx_x =  self.W.toarray()
+        # gradient of x(i+1) with x(i) due to u(i) (in closed-loop)
+        dfdx_u = (self.W_in[:, : self.N_dim] / self.norm_in[1])@self.W_out[: self.N_reservoir, :].T
+        esn_jacobian = dfdx_x + dfdx_u
+        return esn_jacobian

@@ -30,6 +30,7 @@ def set_ESN(my_ESN, param_names, param_scales, params):
         setattr(my_ESN, param_name, new_param)
     return
 
+
 def create_search_grid(n_param, n_grid, grid_range):
     """Generates a grid for the given grid ranges and number of grid points
     Works for any number of parameters
@@ -59,13 +60,9 @@ def create_search_space(n_param, grid_range, param_names):
     search_space = [None] * n_param
     for param_idx in range(n_param):
         if param_names[param_idx] == "tikhonov":
-            search_space[param_idx] = Integer(
-                *grid_range[param_idx], name=param_names[param_idx], dtype=np.int32
-            )
+            search_space[param_idx] = Integer(*grid_range[param_idx], name=param_names[param_idx])
         else:
-            search_space[param_idx] = Real(
-                *grid_range[param_idx], name=param_names[param_idx]
-            )
+            search_space[param_idx] = Real(*grid_range[param_idx], name=param_names[param_idx])
 
     return search_space
 
@@ -121,9 +118,7 @@ def loop(
             reverse_scaler = getattr(reverse_scalers, param_scale)
             print(param_name, reverse_scaler(param))
             if not hasattr(my_ESN, param_name):
-                raise ValueError(
-                    f"Trying to set a non-existing hyperparameter, {param_name}"
-                )
+                raise ValueError(f"Trying to set a non-existing hyperparameter, {param_name}")
 
         print("\n")
         # avoid setting some non-existing hyperparameter
@@ -134,11 +129,7 @@ def loop(
         set_ESN(my_ESN, param_names, param_scales, params)
 
         # train ESN
-        my_ESN.train(
-            U_washout_train,
-            U_train,
-            Y_train
-        )
+        my_ESN.train(U_washout_train, U_train, Y_train)
 
         # divide test set in intervals and predict
         if not isinstance(U_val, list):
@@ -160,28 +151,17 @@ def loop(
             for fold in range(n_folds):
                 # select washout and validation
                 # start_step = fold * (N_val-N_washout)
-                start_step = np.random.randint(
-                    len(U_val[val_idx]) - (N_washout + N_val) - N_trans
-                )
+                start_step = np.random.randint(len(U_val[val_idx]) - (N_washout + N_val) - N_trans)
                 # print("Start_step:", start_step, len(U_val[val_idx]) , N_washout, N_val)
-                U_washout_fold = U_val[val_idx][
-                    start_step: start_step + N_washout
-                ].copy()
+                U_washout_fold = U_val[val_idx][start_step : start_step + N_washout].copy()
 
-                Y_val_fold = Y_val[val_idx][
-                    start_step + N_washout: start_step + N_washout + N_val
-                ].copy()
+                Y_val_fold = Y_val[val_idx][start_step + N_washout : start_step + N_washout + N_val].copy()
                 # predict output validation in closed-loop
-                _, Y_val_pred = my_ESN.closed_loop_with_washout(
-                    U_washout=U_washout_fold,
-                    N_t=N_val
-                )
+                _, Y_val_pred = my_ESN.closed_loop_with_washout(U_washout=U_washout_fold, N_t=N_val)
                 Y_val_pred = Y_val_pred[1:, :]
 
                 # compute error
-                fold_error[fold] = error_measure(
-                    Y_val_fold, Y_val_pred
-                )
+                fold_error[fold] = error_measure(Y_val_fold, Y_val_pred)
                 # print("Fold Prediction", Y_val_fold[N_trans:N_trans+10], Y_val_pred[N_trans:N_trans+10])
                 print("Fold:", fold, ", fold error: ", fold_error[fold])
             # average over intervals
@@ -219,7 +199,6 @@ def validate(
     random_seed=20,
     error_measure=errors.rmse,
 ):
-
     n_param = len(param_names)  # number of parameters
 
     # ranges for hyperparameters
@@ -265,10 +244,10 @@ def validate(
     )
 
     res = run_gp_optimization(
-        val_fun, 
-        search_space, 
-        n_calls, 
-        n_initial_points, 
+        val_fun,
+        search_space,
+        n_calls,
+        n_initial_points,
         rand_state=random_seed,
         search_grid=search_grid,
     )
