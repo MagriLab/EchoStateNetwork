@@ -23,8 +23,8 @@ class ESN:
         reservoir_seeds=[None, None],
         verbose=True,
         r2_mode=False,
-        input_weights_mode="sparse_grouped",
-        reservoir_weights_mode="erdos_renyi2",
+        input_weights_mode="sparse_random",
+        reservoir_weights_mode="erdos_renyi1",
     ):
         """Creates an Echo State Network with the given parameters
         Args:
@@ -602,3 +602,16 @@ class ESN:
         # total derivative
         dfdx = dfdx_x + dfdx_u
         return dfdx
+
+
+    def calculate_constant_jacobian(self):
+        """Jacobian of the reservoir states in its minimal representation 
+        Returns:
+        dfdx: jacobian of the reservoir states
+        """
+        #issue W_in dense no need toarray
+        dfdx_x =  self.W.toarray()
+        # gradient of x(i+1) with x(i) due to u(i) (in closed-loop)
+        dfdx_u = (self.W_in[:, : self.N_dim] / self.norm_in[1])@self.W_out[: self.N_reservoir, :].T
+        esn_jacobian = dfdx_x + dfdx_u
+        return esn_jacobian
