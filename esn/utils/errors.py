@@ -1,5 +1,5 @@
 import numpy as np
-
+import scipy
 
 def L2(y, y_pred, axis=None):
     # equivalent to np.sqrt(np.sum((y-y_pred)**2, axis = axis))
@@ -32,3 +32,8 @@ def nrmse(y, y_pred, axis=None, normalize_by="rms"):
         norm = np.std(y, axis=0) ** 2
 
     return np.mean(rmse(y, y_pred, axis=0) / norm, axis=axis)
+
+
+
+def mean_wasserstein_distance(y, y_pred):
+    return np.mean([scipy.stats.wasserstein_distance(y[:, i], y_pred[:, i]) for i in range(y.shape[1])])
