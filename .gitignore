@@ -11,3 +11,4 @@ dist/
 venv*/
 
 tmp_*
+local*

@@ -20,7 +20,7 @@ class ESN:
         reservoir_seeds=[1, 2],
         verbose=True,
         input_weights_mode="sparse_random",
-        reservoir_weights_mode="erdos_renyi2",
+        reservoir_weights_mode="erdos_renyi1",
     ):
         """Creates an Echo State Network with the given parameters
         Args:
@@ -58,6 +58,7 @@ class ESN:
 
         # Biases
         self.input_bias = input_bias
+        self.input_bias_len = len(self.input_bias)
         self.output_bias = output_bias
 
         # Input normalization
@@ -72,7 +73,7 @@ class ESN:
         # the object should also store the seeds for reproduction
         # initialise input weights
         self.W_in_seeds = input_seeds
-        self.W_in_shape = (self.N_reservoir, self.N_dim + len(self.input_bias))
+        self.W_in_shape = (self.N_reservoir, self.N_dim + self.input_bias_len)
         # N_dim+length of input bias because we augment the inputs with a bias
         # if no bias, then this will be + 0
         self.input_weights_mode = input_weights_mode
@@ -283,13 +284,17 @@ class ESN:
     def generate_input_weights(self):
         if self.input_weights_mode == "sparse_random":
             return generate_input_weights.sparse_random(self.W_in_shape, self.W_in_seeds)
+        elif self.input_weights_mode == "sparse_random_dense_input_bias":
+            return generate_input_weights.sparse_random_dense_input_bias(self.W_in_shape, self.W_in_seeds, self.input_bias_len)
         elif self.input_weights_mode == "sparse_grouped":
             return generate_input_weights.sparse_grouped(self.W_in_shape, self.W_in_seeds)
+        elif self.input_weights_mode == "sparse_grouped_dense_input_bias":
+            return generate_input_weights.sparse_grouped_dense_input_bias(self.W_in_shape, self.W_in_seeds, self.input_bias_len)
         elif self.input_weights_mode == "dense":
             return generate_input_weights.dense(self.W_in_shape, self.W_in_seeds)
         else:
             raise ValueError("Not valid input weights generator.")
-
+        
     def generate_reservoir_weights(self):
         if self.reservoir_weights_mode == "erdos_renyi1":
             return generate_reservoir_weights.erdos_renyi1(self.W_shape, self.sparseness, self.W_seeds)
