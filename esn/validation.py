@@ -27,6 +27,9 @@ def set_ESN(my_ESN, param_names, param_scales, params):
         if len(param_idx_list) == 1:
             new_param = new_param[0]
 
+        if not hasattr(my_ESN, param_name):
+            raise ValueError(f"Trying to set a non-existing hyperparameter, {param_name}")
+
         setattr(my_ESN, param_name, new_param)
     return
 
@@ -99,12 +102,12 @@ def loop(
     N_val,
     N_trans=0,
     error_measure=errors.rmse,
+    run_counter=None,
 ):
     # initialize a base ESN object with unit input scaling and spectral radius
     # seeds not given, so the random generator creates a different seed each run
-    global run_idx
-    run_idx += 1
-    print("--NEW RUN--", run_idx)
+    run_counter[0] += 1
+    print("--NEW RUN--", run_counter[0])
 
     realisation_error = np.zeros(n_realisations)
     for real_idx in range(n_realisations):
@@ -113,17 +116,6 @@ def loop(
             **ESN_dict,
             verbose=False,
         )
-
-        for param_name, param, param_scale in zip(param_names, params, param_scales):
-            reverse_scaler = getattr(reverse_scalers, param_scale)
-            print(param_name, reverse_scaler(param))
-            if not hasattr(my_ESN, param_name):
-                raise ValueError(f"Trying to set a non-existing hyperparameter, {param_name}")
-
-        print("\n")
-        # avoid setting some non-existing hyperparameter
-        # because setattr won't throw an error, but
-        # will simply create a new attribute with that name
 
         # set the ESN with the given parameters
         set_ESN(my_ESN, param_names, param_scales, params)
@@ -173,7 +165,7 @@ def loop(
         print("\n")
     # average over realisations
     error = np.mean(realisation_error)
-    print("Run", run_idx, "error:", error)
+    print("Run", run_counter[0], "error:", error)
     print("\n")
     return error
 
@@ -219,8 +211,7 @@ def validate(
     for param_name in param_names:
         min_dict[param_name] = np.zeros(n_top)
 
-    global run_idx
-    run_idx = 0
+    run_counter = [0]
     # create the validation function
     # skopt minimize takes functions with only parameters as args
     # we create a partial function passing our ESN and other params
@@ -241,6 +232,7 @@ def validate(
         N_val=N_val_steps,
         N_trans=N_transient_steps,
         error_measure=error_measure,
+        run_counter=run_counter,
     )
 
     res = run_gp_optimization(

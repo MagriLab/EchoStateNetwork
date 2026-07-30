@@ -94,7 +94,7 @@ class ESN:
             try:
                 self.reservoir_weights = self.generate_reservoir_weights()
                 valid_W = True
-            except:
+            except (ValueError, RuntimeError, ArithmeticError):
                 # perturb the seeds
                 for i in range(2):
                     if self.W_seeds[i]:
@@ -281,26 +281,33 @@ class ESN:
         # -1 to exclude the neuron itself
         return 1 - (self.connectivity / (self.N_reservoir - 1))
 
+    _INPUT_WEIGHT_GENERATORS = {
+        "sparse_random": lambda self: generate_input_weights.sparse_random(self.W_in_shape, self.W_in_seeds),
+        "sparse_random_dense_input_bias": lambda self: generate_input_weights.sparse_random_dense_input_bias(
+            self.W_in_shape, self.W_in_seeds, self.input_bias_len
+        ),
+        "sparse_grouped": lambda self: generate_input_weights.sparse_grouped(self.W_in_shape, self.W_in_seeds),
+        "sparse_grouped_dense_input_bias": lambda self: generate_input_weights.sparse_grouped_dense_input_bias(
+            self.W_in_shape, self.W_in_seeds, self.input_bias_len
+        ),
+        "dense": lambda self: generate_input_weights.dense(self.W_in_shape, self.W_in_seeds),
+    }
+
+    _RESERVOIR_WEIGHT_GENERATORS = {
+        "erdos_renyi1": lambda self: generate_reservoir_weights.erdos_renyi1(self.W_shape, self.sparseness, self.W_seeds),
+        "erdos_renyi2": lambda self: generate_reservoir_weights.erdos_renyi2(self.W_shape, self.sparseness, self.W_seeds),
+    }
+
     def generate_input_weights(self):
-        if self.input_weights_mode == "sparse_random":
-            return generate_input_weights.sparse_random(self.W_in_shape, self.W_in_seeds)
-        elif self.input_weights_mode == "sparse_random_dense_input_bias":
-            return generate_input_weights.sparse_random_dense_input_bias(self.W_in_shape, self.W_in_seeds, self.input_bias_len)
-        elif self.input_weights_mode == "sparse_grouped":
-            return generate_input_weights.sparse_grouped(self.W_in_shape, self.W_in_seeds)
-        elif self.input_weights_mode == "sparse_grouped_dense_input_bias":
-            return generate_input_weights.sparse_grouped_dense_input_bias(self.W_in_shape, self.W_in_seeds, self.input_bias_len)
-        elif self.input_weights_mode == "dense":
-            return generate_input_weights.dense(self.W_in_shape, self.W_in_seeds)
-        else:
+        try:
+            return self._INPUT_WEIGHT_GENERATORS[self.input_weights_mode](self)
+        except KeyError:
             raise ValueError("Not valid input weights generator.")
 
     def generate_reservoir_weights(self):
-        if self.reservoir_weights_mode == "erdos_renyi1":
-            return generate_reservoir_weights.erdos_renyi1(self.W_shape, self.sparseness, self.W_seeds)
-        if self.reservoir_weights_mode == "erdos_renyi2":
-            return generate_reservoir_weights.erdos_renyi2(self.W_shape, self.sparseness, self.W_seeds)
-        else:
+        try:
+            return self._RESERVOIR_WEIGHT_GENERATORS[self.reservoir_weights_mode](self)
+        except KeyError:
             raise ValueError("Not valid reservoir weights generator.")
 
     def step(self, x_prev, u):
@@ -331,6 +338,7 @@ class ESN:
         Args:
             x0: initial reservoir state
             U: input time series in matrix form (N_t x N_dim)
+            P: reserved for future use; not used yet
 
         Returns:
             X: time series of the reservoir states (N_t x N_reservoir)
@@ -350,15 +358,26 @@ class ESN:
 
         return X
 
+    def _readout_features(self, X, apply_r2):
+        if apply_r2:
+            features = X.copy()
+            if features.ndim == 1:
+                features[1::2] = features[1::2] ** 2
+            else:
+                features[:, 1::2] = features[:, 1::2] ** 2
+        else:
+            features = X
+
+        if features.ndim == 1:
+            return np.hstack((features, self.b_out))
+        N_t = features.shape[0]
+        return np.hstack((features, self.b_out * np.ones((N_t, 1))))
+
     def before_readout_r1(self, x):
-        # augment with bias before readout
-        return np.hstack((x, self.b_out))
+        return self._readout_features(x, apply_r2=False)
 
     def before_readout_r2(self, x):
-        # replaces r with r^2 if even, r otherwise
-        x2 = x.copy()
-        x2[1::2] = x2[1::2] ** 2
-        return np.hstack((x2, self.b_out))
+        return self._readout_features(x, apply_r2=True)
 
     @property
     def before_readout(self):
@@ -433,7 +452,7 @@ class ESN:
             Y: output data
             tikh: weighing tikhonov coefficient that regularises L2 norm
         """
-        reg = Ridge(alpha=self.tikh, fit_intercept=False)
+        reg = Ridge(alpha=tikh, fit_intercept=False)
         reg.fit(X, Y)
         W_out = reg.coef_.T
         return W_out
@@ -444,24 +463,14 @@ class ESN:
         # X_train is one step longer than U_train and Y_train, we discard the initial state
         X_train = X_train[1:, :]
 
-        # augment with the bias
-        N_t = X_train.shape[0]  # number of time steps
-
-        if self.r2_mode:
-            X_train2 = X_train.copy()
-            X_train2[:, 1::2] = X_train2[:, 1::2] ** 2
-            X_train_augmented = np.hstack((X_train2, self.b_out * np.ones((N_t, 1))))
-        else:
-            X_train_augmented = np.hstack((X_train, self.b_out * np.ones((N_t, 1))))
-
-        return X_train_augmented
+        return self._readout_features(X_train, apply_r2=self.r2_mode)
 
     def train(
         self,
         U_washout,
         U_train,
         Y_train,
-        tikhonov=1e-12,
+        tikhonov=None,
         train_idx_list=None,
     ):
         """Trains ESN and sets the output weights.
@@ -470,10 +479,11 @@ class ESN:
             U_train: training input time series
             Y_train: training output time series
             (list of time series if more than one trajectories)
-            tikhonov: regularization coefficient
+            tikhonov: regularization coefficient; defaults to self.tikh when None
             train_idx_list: if list of time series, then which ones to use in training
                 if not specified, all are used
         """
+        reg_tikh = self.tikh if tikhonov is None else tikhonov
         # get the training input
         # this is the reservoir states augmented with the bias after a washout phase
         if isinstance(U_train, list):
@@ -490,7 +500,7 @@ class ESN:
             X_train_augmented = self.reservoir_for_train(U_washout, U_train)
 
         # solve for W_out using ridge regression
-        self.output_weights = self.solve_ridge(X_train_augmented, Y_train, self.tikh)
+        self.output_weights = self.solve_ridge(X_train_augmented, Y_train, reg_tikh)
         return
 
     @property
@@ -500,7 +510,7 @@ class ESN:
         if not hasattr(self, "_dfdu_const"):
             try:
                 self._dfdu_const = self.alpha * self.W_in[:, : self.N_dim].multiply(1.0 / self.norm_in[1][: self.N_dim])
-            except:
+            except AttributeError:
                 self._dfdu_const = self.alpha * np.multiply(self.W_in[:, : self.N_dim], 1.0 / self.norm_in[1][: self.N_dim])
         return self._dfdu_const
 
