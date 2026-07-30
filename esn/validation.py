@@ -257,7 +257,7 @@ def validate(
     # save the best parameters
     for j, min_idx in enumerate(min_idx_list):
         for param_idx, param_name in enumerate(param_names):
-            # rescale the parameters according∂to the given scaling
+            # rescale the parameters according to the given scaling
             reverse_scaler = getattr(reverse_scalers, param_scales[param_idx])
             new_param = reverse_scaler(res.x_iters[min_idx][param_idx])
             min_dict[param_name][j] = new_param
