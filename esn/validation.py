@@ -79,7 +79,7 @@ def run_gp_optimization(val_fun, search_space, n_calls, n_initial_points, rand_s
         n_calls=n_calls,  # total number of evaluations of f
         x0=search_grid,
         n_initial_points=n_initial_points,  # the number of additional random initialization points
-        random_state=0,  # seed
+        random_state=rand_state,
         noise=1e-10,
         n_jobs=1,
     )
