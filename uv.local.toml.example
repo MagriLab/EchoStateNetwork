@@ -1,0 +1,5 @@
+# Copy to uv.local.toml (gitignored) or merge into ~/.config/uv/uv.toml.
+[[tool.uv.index]]
+name = "private-pypi"
+url = "https://your-company.example/artifactory/api/pypi/virtual/simple"
+default = true

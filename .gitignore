@@ -9,6 +9,13 @@ build/
 dist/
 
 venv*/
+.venv/
 
 tmp_*
 local*
+
+# Local environment and tooling (not shared)
+.python-version
+uv.lock
+uv.local.toml
+main.py
