@@ -258,3 +258,8 @@ def validate(
     print(min_dict)
 
     return min_dict
+
+
+def best_hparams(min_dict, param_names, index=0):
+    """Return the hyperparameters at a given rank from validate() output."""
+    return {name: min_dict[name][index] for name in param_names}
